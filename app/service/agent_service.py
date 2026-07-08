@@ -14,6 +14,13 @@ from app.service.agents.knowledge_augmentor_service import KnowledgeAugmentorSer
 from app.service.agents.answer_gen_service import AnswerGenService
 # 앞서 만든 app/agents/__init__.py를 통해 메인 그래프를 import 합니다.
 from app.agents import super_graph
+
+#앞서 구현한 AgentService에 AgentException과 ValidationException 예외처리를 적용합니다.
+from app.exceptions import AgentException, ValidationException
+
+
+
+
 # [환경 설정]
 # .env 파일이 있으면 로드하고, 없으면 주입된 환경변수를 사용합니다.
 load_dotenv(override=False)
@@ -96,8 +103,14 @@ class AgentService:
             config["configurable"]["thread_id"] = session_id
         
         # Super Graph 실행
-        result = super_graph.invoke(full_inputs, config=config)
-        return result
+        try:
+            result = super_graph.invoke(full_inputs, config=config)
+            return result
+        except Exception as e:
+            raise AgentException(f"Agent execution failed: {str(e)}")
+        
+
+        
     # 5.4. 실시간 스트리밍 (stream_agent)
     # 에이전트 서비스를 스트리밍 형태로 실행하는 함수를 정의합니다.
     async def stream_agent(self, inputs: Dict[str, Any], session_id: str = None):
