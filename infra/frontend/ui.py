@@ -152,7 +152,7 @@ if prompt := st.chat_input("의료 관련 질문을 입력하세요."):
         "role": "assistant",
         "content": full_response
     })
-    
+
 # Footer information
 st.markdown("---")
 st.caption("Powered by Upstage Solar LLM & LangGraph")
