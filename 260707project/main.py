@@ -105,20 +105,21 @@ def create_fairytale(child_id: int, request: FairyTaleCreate, session: Session =
     session.commit()
     session.refresh(db_fairytale)
     
+    import time
+    
     # 4. 커버 이미지 생성 (표지)
-    # LLM이 생성해준 cover_image_prompt를 사용합니다.
     cover_prompt = generated_data.get("cover_image_prompt", f"A beautiful storybook cover art for a fairy tale titled '{db_fairytale.title}'")
     cover_image_url = generate_page_image(
         image_prompt=cover_prompt,
         fairytale_id=db_fairytale.id,
         page_num=0
     )
-    time.sleep(5)
+    time.sleep(5) # 무료 API 속도 제한(Rate Limit) 방어
     
     # 5. 페이지 이미지 생성 및 JSON 배열에 커버 추가
     content_list = json.loads(generated_data["content_json"])
     
-    # 프론트엔드가 순차적으로 렌더링하기 쉽도록 0번 인덱스에 표지(Cover) 데이터를 삽입합니다.
+    # 0번 인덱스에 표지(Cover) 데이터를 삽입합니다.
     content_list.insert(0, {
         "page": 0,
         "is_cover": True,
@@ -138,7 +139,7 @@ def create_fairytale(child_id: int, request: FairyTaleCreate, session: Session =
             # 무료 API의 속도 제한(Rate Limit) 방어를 위해 5초 대기
             time.sleep(5)
             
-    # 최종 JSON 저장
+    # 최종 JSON DB 저장
     db_fairytale.content_json = json.dumps(content_list, ensure_ascii=False)
     session.add(db_fairytale)
     session.commit()
