@@ -1,0 +1,20 @@
+[project]
+name = "260707project"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "chromadb>=1.5.9",
+    "fastapi>=0.139.0",
+    "google-genai>=2.10.0",
+    "json-repair>=0.61.2",
+    "numpy>=2.5.1",
+    "openai>=2.44.0",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.2",
+    "python-dotenv>=1.2.2",
+    "scikit-learn>=1.9.0",
+    "sqlmodel>=0.0.39",
+    "uvicorn>=0.50.2",
+]
