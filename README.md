@@ -26,13 +26,23 @@ Node 버전이 18보다 낮다면 먼저 Node를 업데이트해 주세요.
 ```bash
 npm install
 npm run dev
+
+## 여기 참고-
+streamlit_app_inline.py 사용
+터미널에 streamlit run streamlit_app_inline.py 입력
 ```
 
 브라우저에서 아래 주소를 열면 됩니다.
 
 ```text
-http://localhost:3000
+http://localhost:8501
 ```
+
+## 주의 사항-
+''' 별점 평점 저장하기 위한 설치 코드 
+pip install streamlit streamlit-javascript streamlit-autorefresh
+평점 기록은 satisfaction_ratings.json 에 저장됨
+'''
 
 ## 다음 단계
 
