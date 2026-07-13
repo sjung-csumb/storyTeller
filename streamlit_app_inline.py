@@ -32,12 +32,19 @@
 # 추가로 필요한 패키지:
 #   pip install streamlit streamlit-javascript streamlit-autorefresh
 
+import base64
 import json
+import os
+import warnings
 from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
+
+# st.components.v1.html Deprecation Warning 터미널 도배 방지
+warnings.filterwarnings("ignore", message=".*replace.*st.components.v1.html.*with.*st.iframe.*")
+warnings.filterwarnings("ignore", message=".*st.components.v1.html.*will be removed.*")
 
 try:
     from streamlit_javascript import st_javascript
@@ -47,6 +54,17 @@ except ImportError:
     _SYNC_AVAILABLE = False
 
 RATINGS_FILE = Path(__file__).parent / "satisfaction_ratings.json"
+STATIC_DIR = Path(__file__).parent / "static"
+
+
+def load_image_data_uri(filename, mime="image/jpeg"):
+    """static/ 폴더의 배경 이미지를 base64 data URI로 읽어옵니다.
+    파일이 없으면 빈 문자열을 돌려줘서(그라데이션만 남고) 앱이 죽지 않게 합니다."""
+    path = STATIC_DIR / filename
+    if not path.exists():
+        return ""
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
 
 st.set_page_config(
     page_title="AI 동화 만들기 - 판타지 에디션",
@@ -91,8 +109,8 @@ def already_saved(rated_at_browser):
 st.markdown(
     """
     <style>
-    .block-container { padding-top: 1.2rem; padding-bottom: 1.2rem; max-width: 100% !important; }
-    #MainMenu, header, footer { visibility: hidden; height: 0; }
+    .block-container { padding-top: 0rem !important; padding-bottom: 0rem !important; margin-top: 0rem !important; max-width: 100% !important; }
+    #MainMenu, header, footer { visibility: hidden; height: 0; display: none; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -224,138 +242,351 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .star-btn:focus {
             outline: none;
         }
+
+        /* ================================================================
+           스테이지별 모험 배경 (숲 입구 → 동굴 던전 입구 → 보물의 방)
+           - 순수 CSS/SVG(data URI)/이모지로만 구성해서 외부 이미지 요청이 없습니다.
+           - 입력 카드(storybook-card)는 항상 불투명하게 위에 떠 있어서,
+             배경이 아무리 화려해져도 입력/안내 문구 가독성에는 영향이 없습니다.
+           - goToStage()가 stage 번호에 맞춰 scene-forest/cave/vault 클래스를 바꿔줍니다.
+           - 던전(로딩/책) 테마로 전환되면 전체가 자연스럽게 사라집니다.
+           ================================================================ */
+        .scene-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            overflow: hidden;
+            pointer-events: none;
+            transition: opacity 1.4s ease-in-out;
+        }
+        body.bg-dungeon-theme .scene-backdrop {
+            opacity: 0;
+        }
+
+        .scene-layer {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            transition: opacity 1.1s ease-in-out;
+        }
+        .scene-backdrop.scene-forest .scene-layer-forest,
+        .scene-backdrop.scene-cave .scene-layer-cave,
+        .scene-backdrop.scene-vault .scene-layer-vault {
+            opacity: 1;
+        }
+
+        /* ---------- 1. 숲의 입구 (Stage 1) ---------- */
+        .forest-sky {
+            position: absolute;
+            inset: 0;
+            background-color: #1b2a33;
+            background-size: cover;
+            background-position: center 35%;
+            /* 아래 url()에는 static/bg_forest.jpg가 base64 data URI로 주입됩니다 */
+            background-image: url("__BG_FOREST__");
+        }
+
+        /* ---------- 2. 동굴(던전) 입구 (Stage 2) ---------- */
+        .cave-bg {
+            position: absolute;
+            inset: 0;
+            background-color: #120c22;
+            background-size: cover;
+            background-position: center;
+            /* 아래 url()에는 static/bg_cave.jpg가 base64 data URI로 주입됩니다 */
+            background-image: url("__BG_CAVE__");
+        }
+        .cave-mist {
+            position: absolute;
+            left: 0; right: 0; bottom: 0;
+            height: 22%;
+            background: linear-gradient(180deg, rgba(30,20,55,0) 0%, rgba(20,14,38,0.85) 100%);
+        }
+
+        /* ---------- 3. 보물의 방 (Stage 3) ---------- */
+        .vault-bg {
+            position: absolute;
+            inset: 0;
+            background-color: #0c0703;
+            background-size: cover;
+            background-position: center;
+            /* 아래 url()에는 static/bg_vault.jpg가 base64 data URI로 주입됩니다 */
+            background-image: url("__BG_VAULT__");
+        }
+
+        /* --- 동화책 표지 느낌의 메인 카드 (배경 사진이 살짝 비치는 반투명 유리 느낌) --- */
+        .storybook-card {
+            position: relative;
+            z-index: 10;
+        }
+        .storybook-card::before {
+            content: "";
+            position: absolute;
+            inset: 9px;
+            border: 2px dashed rgba(217, 164, 65, 0.35);
+            border-radius: 22px;
+            pointer-events: none;
+            transition: opacity 0.8s ease;
+        }
+        body.bg-dungeon-theme .storybook-card::before {
+            opacity: 0;
+        }
+        /* stage1~3(던전 테마가 아닐 때)에만 반투명 유리 배경을 입혀서 뒤의 사진이 은은하게 비치게 합니다.
+           #mainBox 아이디를 포함해 명시도를 높여서 Tailwind의 bg-white 유틸리티보다 항상 우선 적용되고,
+           로딩/책 단계(던전 테마)에서는 이 규칙이 아예 적용되지 않아 기존 bg-black/40 스타일이 그대로 유지됩니다. */
+        body:not(.bg-dungeon-theme) #mainBox.storybook-card {
+            background-color: rgba(255, 253, 247, 0.82);
+            backdrop-filter: blur(14px) saturate(1.1);
+            -webkit-backdrop-filter: blur(14px) saturate(1.1);
+        }
+
+        /* --- 스테이지 2/3 카드 뒤에 가려지는 동굴 입구/전설의 서를 카드 위쪽 "창문"으로 보여줍니다 --- */
+        .scene-peek {
+            width: 100%;
+            height: 128px;
+            background-size: cover;
+            border-radius: 18px;
+            margin-bottom: 1.1rem;
+            position: relative;
+            box-shadow: 0 8px 22px rgba(0,0,0,0.35), inset 0 0 0 2px rgba(255,255,255,0.18);
+        }
+        .scene-peek::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            background: linear-gradient(180deg, rgba(0,0,0,0) 45%, rgba(0,0,0,0.4) 100%);
+        }
+        .scene-peek-cave {
+            background-image: url("__BG_CAVE__");
+            background-position: center 30%;
+            box-shadow: 0 8px 22px rgba(0,0,0,0.35), inset 0 0 0 2px rgba(147, 165, 255, 0.4);
+        }
+        .scene-peek-vault {
+            background-image: url("__BG_VAULT__");
+            background-position: center 38%;
+            box-shadow: 0 8px 22px rgba(0,0,0,0.35), inset 0 0 0 2px rgba(255, 205, 110, 0.45);
+        }
+
+        /* --- 스테이지 2 (동굴) 배경에 어울리는 입력칸 --- */
+        #stage2 input[type="text"] {
+            background-color: rgba(24, 20, 45, 0.55);
+            color: #e9e9ff;
+            border-color: rgba(147, 165, 255, 0.4);
+        }
+        #stage2 input[type="text"]::placeholder {
+            color: rgba(210, 216, 255, 0.55);
+        }
+        #stage2 input[type="text"]:focus {
+            background-color: rgba(24, 20, 45, 0.72);
+            border-color: #93a5ff;
+        }
+
+        /* --- 스테이지 3 (보물의 방) 배경에 어울리는 입력칸 --- */
+        #stage3 textarea {
+            background-color: rgba(58, 38, 16, 0.1);
+            color: #4a2e15;
+            border-color: rgba(190, 140, 60, 0.45);
+        }
+        #stage3 textarea::placeholder {
+            color: rgba(120, 90, 50, 0.6);
+        }
+        #stage3 textarea:focus {
+            background-color: rgba(255, 250, 235, 0.85);
+            border-color: #b8860b;
+        }
+
+        /* --- 입력 항목 아이콘 뱃지 --- */
+        .field-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 4px;
+        }
+
+        /* --- 진행 단계 점(dot) 크기/발광 강조 --- */
+        .stage-dot {
+            transition: all 0.4s ease;
+        }
+        .stage-dot.stage-dot-active {
+            box-shadow: 0 0 10px 2px rgba(251, 191, 36, 0.65);
+            transform: scale(1.15);
+        }
+
+        /* --- SMILE 로고 (모든 스테이지에 고정, 어두운 배경 위에서도 흰색 글로우로 잘 보이게) --- */
+        .logo-smile-img {
+            height: 86px;
+            width: auto;
+            display: block;
+            filter:
+                drop-shadow(0 0 3px rgba(255,255,255,0.85))
+                drop-shadow(0 0 8px rgba(255,255,255,0.55))
+                drop-shadow(0 0 16px rgba(255,255,255,0.3));
+        }
     </style>
 </head>
 <body class="bg-stone-100 text-gray-800 min-h-screen flex flex-col items-center justify-center p-6 transition-colors duration-1000">
 
-    <div id="mainBox" class="w-full max-w-xl bg-white rounded-3xl p-10 shadow-2xl border border-stone-200 relative overflow-hidden transition-all duration-1000 ease-in-out">
+    <!-- 스테이지별 모험 배경 (숲 입구 → 동굴 던전 입구 → 보물의 방). 순수 장식용이라 클릭/폼 로직에는 영향이 없고,
+         goToStage()가 stage 번호에 맞춰 scene-forest/scene-cave/scene-vault 클래스를 바꿔줍니다. -->
+    <div id="sceneBackdrop" class="scene-backdrop scene-forest" aria-hidden="true">
+
+        <!-- 1. 숲의 입구 -->
+        <div class="scene-layer scene-layer-forest">
+            <div class="forest-sky"></div>
+        </div>
+
+        <!-- 2. 동굴(던전) 입구 -->
+        <div class="scene-layer scene-layer-cave">
+            <div class="cave-bg"></div>
+            <div class="cave-mist"></div>
+        </div>
+
+        <!-- 3. 보물의 방 (전설의 동화책을 얻는 곳) -->
+        <div class="scene-layer scene-layer-vault">
+            <div class="vault-bg"></div>
+        </div>
+    </div>
+
+    <!-- 내가 만든 동화 히스토리 (햄버거 메뉴) -->
+    <button type="button" id="historyMenuBtn" onclick="openHistoryDrawer()" title="내가 만든 동화 보기"
+        class="fixed top-6 left-10 z-40 w-11 h-11 rounded-full bg-white/85 hover:bg-white shadow-md border border-stone-200 flex items-center justify-center text-xl text-stone-700 transition-all hover:scale-105 backdrop-blur-sm">
+        ☰
+    </button>
+
+    <div id="historyOverlay" onclick="closeHistoryDrawer()" class="fixed inset-0 bg-black/50 z-40 hidden"></div>
+
+    <div id="historyDrawer" class="fixed top-0 left-0 h-full w-80 max-w-[85vw] bg-stone-50 shadow-2xl z-50 -translate-x-full transition-transform duration-300 ease-in-out flex flex-col">
+        <div class="flex items-center justify-between py-5 pr-5 pl-10 border-b border-stone-200">
+            <h3 class="text-xl font-bold text-stone-800">📚 내가 만든 동화</h3>
+            <button type="button" onclick="closeHistoryDrawer()" class="text-2xl leading-none text-stone-400 hover:text-stone-700">&times;</button>
+        </div>
+        <div id="historyList" class="flex-1 overflow-y-auto py-4 pr-4 pl-10 space-y-3"></div>
+    </div>
+
+    <!-- SMILE 로고 (모든 스테이지 + 동화 생성 이후에도 항상 떠 있고, 클릭하면 처음으로 리셋) -->
+    <button type="button" id="logoResetBtn" onclick="location.reload()" title="처음으로 돌아가기"
+        class="fixed top-6 right-10 z-40 bg-transparent border-none p-0 cursor-pointer transition-transform hover:scale-105">
+        <img src="__SMILE_LOGO__" alt="SMILE 로고" class="logo-smile-img">
+    </button>
+
+    <div id="mainBox" class="storybook-card w-full max-w-xl bg-white rounded-3xl p-10 shadow-2xl border border-stone-200 relative overflow-hidden transition-all duration-1000 ease-in-out">
         <!-- 1. stage1 주인공 이름 -->
         <div id="stage1" class="fade-in">
             <div class="text-center mb-8">
                 <div class="flex justify-center items-center gap-2 mb-2">
-                    <span class="w-2 h-2 rounded-full bg-amber-400"></span>
-                    <span class="w-2 h-2 rounded-full bg-gray-200"></span>
-                    <span class="w-2 h-2 rounded-full bg-gray-200"></span>
+                    <span class="stage-dot stage-dot-active w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                    <span class="stage-dot w-2.5 h-2.5 rounded-full bg-gray-200"></span>
+                    <span class="stage-dot w-2.5 h-2.5 rounded-full bg-gray-200"></span>
                 </div>
                 <span class="text-xs font-semibold tracking-wider text-amber-500 uppercase">STAGE 1 / 3</span>
-                <h1 class="text-3xl font-bold mt-1 text-gray-800">📖 AI 동화만들기 프로젝트</h1>
-                <p class="text-2sm text-gray-500 mt-1">이야기의 주인공을 설정해 주세요</p>
+                <h1 class="text-3xl font-bold mt-1 text-gray-800">📖 SMILE</h1>
+                <p class="text-xl font-bold mt-1 text-gray-600">행동 교정 동화 생성 서비스</p>
             </div>
 
             <form class="space-y-6" onsubmit="event.preventDefault(); goToStage(2);">
                 <div>
-                    <label class="block text-xl font-semibold text-gray-700 mb-2">주인공 이름</label>
+                    <label class="block text-xl font-semibold text-gray-700 mb-2"><span class="field-icon">🧑</span>주인공 이름</label>
                     <input type="text" id="heroNameInput" placeholder="예: 김사과" class="w-full bg-stone-50 border border-stone-200 rounded-[20px] px-4 py-3 text-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:border-amber-400 focus:bg-white transition-colors" required>
                 </div>
 
                 <div>
-                    <label class="block text-xl font-semibold text-gray-700 mb-2">나이</label>
-                    <div class="grid grid-cols-4 gap-2">
-                        <label class="relative flex items-center justify-center bg-stone-50 border border-stone-200 rounded-xl py-1.5 px-2 cursor-pointer hover:border-stone-300 transition-all has-[:checked]:border-amber-400 has-[:checked]:bg-amber-50">
-                            <input type="radio" name="age" value="3" class="absolute opacity-0 peer">
-                            <span class="text-lg font-medium text-gray-500 peer-checked:text-amber-600 peer-checked:font-bold">3세</span>
-                        </label>
-                        <label class="relative flex items-center justify-center bg-stone-50 border border-stone-200 rounded-xl py-1.5 px-2 cursor-pointer hover:border-stone-300 transition-all has-[:checked]:border-amber-400 has-[:checked]:bg-amber-50">
-                            <input type="radio" name="age" value="4" class="absolute opacity-0 peer">
-                            <span class="text-lg font-medium text-gray-500 peer-checked:text-amber-600 peer-checked:font-bold">4세</span>
-                        </label>
-                        <label class="relative flex items-center justify-center bg-stone-50 border border-stone-200 rounded-xl py-1.5 px-2 cursor-pointer hover:border-stone-300 transition-all has-[:checked]:border-amber-400 has-[:checked]:bg-amber-50">
-                            <input type="radio" name="age" value="5" class="absolute opacity-0 peer">
-                            <span class="text-lg font-medium text-gray-500 peer-checked:text-amber-600 peer-checked:font-bold">5세</span>
-                        </label>
-                        <label class="relative flex items-center justify-center bg-stone-50 border border-stone-200 rounded-xl py-1.5 px-2 cursor-pointer hover:border-stone-300 transition-all has-[:checked]:border-amber-400 has-[:checked]:bg-amber-50">
-                            <input type="radio" name="age" value="6" class="absolute opacity-0 peer">
-                            <span class="text-lg font-medium text-gray-500 peer-checked:text-amber-600 peer-checked:font-bold">6세</span>
-                        </label>
-                    </div>
+                    <label class="block text-xl font-semibold text-gray-700 mb-2"><span class="field-icon">🎂</span>출생연도</label>
+                    <input type="text" id="birthYearInput" inputmode="numeric" maxlength="4" placeholder="예: 2026" class="w-full bg-stone-50 border border-stone-200 rounded-[20px] px-4 py-3 text-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:border-amber-400 focus:bg-white transition-colors" required>
                 </div>
 
                 <div>
-                    <label class="block text-xl font-semibold text-gray-700 mb-2">성별</label>
+                    <label class="block text-xl font-semibold text-gray-700 mb-2"><span class="field-icon">👫</span>성별</label>
                     <div class="flex gap-2">
-                        <label class="flex-1 relative flex items-center justify-center bg-stone-50 border border-stone-200 rounded-xl p-3 cursor-pointer hover:border-stone-300 transition-all has-[:checked]:border-amber-400 has-[:checked]:bg-amber-50">
+                        <label class="flex-1 relative flex items-center justify-center gap-2 bg-stone-50 border border-stone-200 rounded-xl p-3 cursor-pointer hover:border-stone-300 hover:scale-[1.02] transition-all has-[:checked]:border-amber-400 has-[:checked]:bg-amber-50">
                             <input type="radio" name="gender" value="male" class="absolute opacity-0 peer">
+                            <span class="text-xl">🤴</span>
                             <span class="text-lg font-medium text-gray-500 peer-checked:text-amber-600 peer-checked:font-bold">남</span>
                         </label>
-                        <label class="flex-1 relative flex items-center justify-center bg-stone-50 border border-stone-200 rounded-xl p-3 cursor-pointer hover:border-stone-300 transition-all has-[:checked]:border-amber-400 has-[:checked]:bg-amber-50">
+                        <label class="flex-1 relative flex items-center justify-center gap-2 bg-stone-50 border border-stone-200 rounded-xl p-3 cursor-pointer hover:border-stone-300 hover:scale-[1.02] transition-all has-[:checked]:border-amber-400 has-[:checked]:bg-amber-50">
                             <input type="radio" name="gender" value="female" class="absolute opacity-0 peer">
+                            <span class="text-xl">👸</span>
                             <span class="text-lg font-medium text-gray-500 peer-checked:text-amber-600 peer-checked:font-bold">여</span>
                         </label>
                     </div>
                 </div>
 
-                <button type="submit" class="w-full bg-amber-400 hover:bg-amber-300 text-xl text-gray-900 font-bold py-4 rounded-[20px] shadow-sm hover:shadow-md transition-all mt-6 flex items-center justify-center gap-2">
+                <button type="submit" class="w-full bg-amber-400 hover:bg-amber-300 text-xl text-gray-900 font-bold py-4 rounded-[20px] shadow-sm hover:shadow-md hover:scale-[1.02] active:scale-95 transition-all mt-6 flex items-center justify-center gap-2">
                     다음 단계로 이동 ➜
                 </button>
             </form>
         </div>
 
         <div id="stage2" class="hidden-stage fade-in">
+            <div class="scene-peek scene-peek-cave" aria-hidden="true"></div>
             <div class="text-center mb-8">
                 <div class="flex justify-center items-center gap-2 mb-2">
-                    <span class="w-2 h-2 rounded-full bg-gray-200"></span>
-                    <span class="w-2 h-2 rounded-full bg-amber-400"></span>
-                    <span class="w-2 h-2 rounded-full bg-gray-200"></span>
+                    <span class="stage-dot w-2.5 h-2.5 rounded-full bg-gray-200"></span>
+                    <span class="stage-dot stage-dot-active w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                    <span class="stage-dot w-2.5 h-2.5 rounded-full bg-gray-200"></span>
                 </div>
                 <span class="text-xs font-semibold tracking-wider text-amber-500 uppercase">STAGE 2 / 3</span>
-                <h2 class="text-3xl font-bold mt-1 text-gray-800">어떤 이야기인가요?</h2>
+                <h2 class="text-3xl font-bold mt-1 text-gray-800">🪄 어떤 이야기인가요?</h2>
                 <p class="text-2xs text-gray-500 mt-1">주인공과 배경에 대해 더 자세히 알려주세요</p>
             </div>
             <form class="space-y-4" onsubmit="event.preventDefault(); goToStage(3);">
                 <div>
-                    <label class="block text-xl font-semibold text-gray-700 mb-1">주인공의 외형</label>
-                    <input type="text" placeholder="예: 빨간 모자를 쓰고 있어요" class="w-full bg-stone-50 border border-stone-200 rounded-[16px] px-4 py-2.5 text-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:border-amber-400 focus:bg-white transition-colors" required>
+                    <label class="block text-xl font-semibold text-gray-700 mb-1"><span class="field-icon">👗</span>주인공의 외형</label>
+                    <input type="text" id="appearanceInput" placeholder="예: 빨간 모자를 쓰고 있어요" class="w-full bg-stone-50 border border-stone-200 rounded-[16px] px-4 py-2.5 text-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:border-amber-400 focus:bg-white transition-colors" required>
                 </div>
                 <div>
-                    <label class="block text-xl font-semibold text-gray-700 mb-1">주인공의 성격</label>
-                    <input type="text" placeholder="예: 호기심이 많고 용감해요" class="w-full bg-stone-50 border border-stone-200 rounded-[16px] px-4 py-2.5 text-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:border-amber-400 focus:bg-white transition-colors" required>
+                    <label class="block text-xl font-semibold text-gray-700 mb-1"><span class="field-icon">💫</span>주인공의 성격</label>
+                    <input type="text" id="personalityInput" placeholder="예: 호기심이 많고 용감해요" class="w-full bg-stone-50 border border-stone-200 rounded-[16px] px-4 py-2.5 text-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:border-amber-400 focus:bg-white transition-colors" required>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                     <div>
-                        <label class="block text-xl font-semibold text-gray-700 mb-1">장소</label>
-                        <input type="text" placeholder="예: 깊은 숲속" class="w-full bg-stone-50 border border-stone-200 rounded-[16px] px-4 py-2.5 text-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:border-amber-400 focus:bg-white transition-colors" required>
+                        <label class="block text-xl font-semibold text-gray-700 mb-1"><span class="field-icon">🗺️</span>장소</label>
+                        <input type="text" id="placeInput" placeholder="예: 깊은 숲속" class="w-full bg-stone-50 border border-stone-200 rounded-[16px] px-4 py-2.5 text-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:border-amber-400 focus:bg-white transition-colors" required>
                     </div>
                     <div>
-                        <label class="block text-xl font-semibold text-gray-700 mb-1">시대</label>
-                        <input type="text" placeholder="예: 아주 먼 옛날" class="w-full bg-stone-50 border border-stone-200 rounded-[16px] px-4 py-2.5 text-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:border-amber-400 focus:bg-white transition-colors" required>
+                        <label class="block text-xl font-semibold text-gray-700 mb-1"><span class="field-icon">⏳</span>시대</label>
+                        <input type="text" id="timePeriodInput" placeholder="예: 아주 먼 옛날" class="w-full bg-stone-50 border border-stone-200 rounded-[16px] px-4 py-2.5 text-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:border-amber-400 focus:bg-white transition-colors" required>
                     </div>
                 </div>
                 <div>
-                    <label class="block text-xl font-semibold text-gray-700 mb-1">분위기</label>
-                    <input type="text" placeholder="예: 신비롭고 따뜻한 느낌" class="w-full bg-stone-50 border border-stone-200 rounded-[16px] px-4 py-2.5 text-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:border-amber-400 focus:bg-white transition-colors" required>
+                    <label class="block text-xl font-semibold text-gray-700 mb-1"><span class="field-icon">🌈</span>분위기</label>
+                    <input type="text" id="moodInput" placeholder="예: 신비롭고 따뜻한 느낌" class="w-full bg-stone-50 border border-stone-200 rounded-[16px] px-4 py-2.5 text-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:border-amber-400 focus:bg-white transition-colors" required>
                 </div>
                 <div class="flex gap-3 mt-6">
                     <button type="button" onclick="goToStage(1)" class="w-1/3 bg-stone-100 hover:bg-stone-200 text-xl text-gray-600 font-bold py-4 rounded-[20px] transition-all flex items-center justify-center">이전</button>
-                    <button type="submit" class="w-2/3 bg-amber-400 hover:bg-amber-300 text-xl text-gray-900 font-bold py-4 rounded-[20px] shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-2">다음 단계로 ➜</button>
+                    <button type="submit" class="w-2/3 bg-amber-400 hover:bg-amber-300 text-xl text-gray-900 font-bold py-4 rounded-[20px] shadow-sm hover:shadow-md hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2">다음 단계로 ➜</button>
                 </div>
             </form>
         </div>
 
         <div id="stage3" class="hidden-stage fade-in relative">
+            <div class="scene-peek scene-peek-vault" aria-hidden="true"></div>
+
             <!-- 언어 선택 토글 (KO/EN) -->
-            <div class="absolute top-0 right-0 flex items-center gap-1 bg-stone-100 border border-stone-200 rounded-full p-1 z-10">
+            <div class="absolute top-3 right-3 flex items-center gap-1 bg-stone-100 border border-stone-200 rounded-full p-1 z-10">
                 <button type="button" id="langKoBtn" onclick="setStoryLanguage('ko')" class="lang-toggle-btn active px-3 py-1.5 rounded-full text-sm font-bold">KO</button>
                 <button type="button" id="langEnBtn" onclick="setStoryLanguage('en')" class="lang-toggle-btn px-3 py-1.5 rounded-full text-sm font-bold">EN</button>
             </div>
 
             <div class="text-center mb-8">
                 <div class="flex justify-center items-center gap-2 mb-2">
-                    <span class="w-2 h-2 rounded-full bg-gray-200"></span>
-                    <span class="w-2 h-2 rounded-full bg-gray-200"></span>
-                    <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+                    <span class="stage-dot w-2.5 h-2.5 rounded-full bg-gray-200"></span>
+                    <span class="stage-dot w-2.5 h-2.5 rounded-full bg-gray-200"></span>
+                    <span class="stage-dot stage-dot-active w-2.5 h-2.5 rounded-full bg-amber-400"></span>1
                 </div>
                 <span class="text-xs font-semibold tracking-wider text-amber-500 uppercase">STAGE 3 / 3</span>
-                <h2 class="text-3xl font-bold mt-1 text-gray-800" id="stage3Title">어떤 일이 생겼나요?</h2>
+                <h2 class="text-3xl font-bold mt-1 text-gray-800" id="stage3Title">📜 어떤 일이 생겼나요?</h2>
                 <p class="text-2xs text-gray-500 mt-1" id="stage3Subtitle">주인공이 겪는 문제나 사건을 적어주세요</p>
             </div>
             <form class="space-y-6" onsubmit="event.preventDefault(); submitForm();">
                 <div>
-                    <label class="block text-xl font-semibold text-gray-700 mb-2" id="problemLabel">문제 상황</label>
+                    <label class="block text-xl font-semibold text-gray-700 mb-2" id="problemLabel"><span class="field-icon">📝</span>문제 상황</label>
+                    <p class="text-sm text-amber-700 mb-3 bg-amber-50 p-2.5 rounded-xl border border-amber-200">💡 <b>Tip:</b> "아이가 ~해서 실망했어요"보다 <b>"아이에게 ~하는 용기를 주고 싶어요"</b>라고 적어주시면, 긍정적 행동 변화를 이끌어내는 데 훨씬 효과적입니다!</p>
                     <textarea id="problemTextarea" rows="7" placeholder="예: 소중한 장난감을 잃어버려서 슬퍼하고 있어요. 친구들과 어떻게 화해해야 할지 모르겠어요." class="w-full bg-stone-50 border border-stone-200 rounded-[20px] px-4 py-4 text-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:border-amber-400 focus:bg-white transition-colors resize-none" required></textarea>
                 </div>
                 <div class="flex gap-3 mt-6">
                     <button type="button" onclick="goToStage(2)" class="w-1/3 bg-stone-100 hover:bg-stone-200 text-xl text-gray-600 font-bold py-4 rounded-[20px] transition-all flex items-center justify-center" id="prevBtnText">이전</button>
-                    <button type="submit" class="w-2/3 bg-orange-400 hover:bg-orange-500 text-xl text-white font-bold py-4 rounded-[20px] shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2" id="submitBtnText">✨ 이야기 만들기!</button>
+                    <button type="submit" class="w-2/3 bg-orange-400 hover:bg-orange-500 text-xl text-white font-bold py-4 rounded-[20px] shadow-md hover:shadow-lg hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2" id="submitBtnText">✨ 이야기 만들기!</button>
                 </div>
             </form>
         </div>
@@ -374,6 +605,45 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </div>
                 <div class="w-full h-3 bg-stone-900 rounded-full overflow-hidden border border-amber-900/50 shadow-inner">
                     <div id="progressBar" class="h-full bg-gradient-to-r from-amber-600 via-yellow-500 to-amber-300 rounded-full transition-all duration-300 ease-out shadow-[0_0_10px_rgba(252,211,77,0.8)]" style="width: 0%;"></div>
+                </div>
+            </div>
+
+            <!-- 전문가 육아 지침 영역 (그림 생성 단계에서만 보임) -->
+            <div id="guideTextContainer" class="hidden w-full mt-10 bg-black/40 border border-amber-700/50 rounded-2xl p-5 shadow-2xl backdrop-blur-sm text-left opacity-0 transition-opacity duration-1000">
+                <h3 class="text-base font-bold text-amber-400 mb-2 flex items-center gap-2">
+                    <span class="text-lg">💡</span>이 동화에 쓰인 육아 지침
+                </h3>
+                <p id="guideTextContent" class="text-lg text-amber-50/90 leading-relaxed whitespace-pre-wrap max-h-[140px] overflow-y-auto pr-2"></p>
+            </div>
+        </div>
+
+        <div id="stageDraft" class="hidden-stage fade-in w-full">
+            <div class="text-center mb-6">
+                <span class="text-sm font-semibold tracking-wider text-amber-500 uppercase">이야기 초안</span>
+                <h2 class="text-3xl font-bold mt-1 text-gray-800">✏️ 이야기가 이렇게 만들어졌어요</h2>
+                <p class="text-sm text-gray-500 mt-1">아직 그림은 그리지 않았어요. 고치고 싶은 부분이 있으면 알려주세요.</p>
+            </div>
+
+            <div id="draftPagesContainer" class="space-y-4 max-h-[55vh] overflow-y-auto px-1 mb-4 pr-2">
+                <!-- JS(renderDraftPages)로 채워짐: 페이지별 텍스트 카드. 내용이 넘치면 이 안에서만 스크롤됩니다 -->
+            </div>
+
+            <div id="feedbackLog" class="space-y-1 mb-3 text-xs text-emerald-600"></div>
+
+            <div class="space-y-3">
+                <label class="block text-lg font-semibold text-gray-700">
+                    <span class="field-icon">💬</span>어떻게 고쳐드릴까요?
+                    <span class="text-sm text-gray-400 font-normal">(예: 아빠도 등장시켜줘, 결말을 더 신나게 해줘)</span>
+                </label>
+                <textarea id="feedbackTextarea" rows="3" placeholder="수정하고 싶은 부분을 적어주세요. 없다면 비워두고 바로 그림을 그려도 돼요." class="w-full bg-stone-50 border border-stone-200 rounded-[20px] px-4 py-3 text-base text-gray-800 placeholder-gray-400 focus:outline-none focus:border-amber-400 focus:bg-white transition-colors resize-none"></textarea>
+
+                <div class="flex gap-3">
+                    <button type="button" onclick="submitFeedback()" id="reviseBtn" class="w-1/2 bg-stone-100 hover:bg-stone-200 text-lg text-gray-700 font-bold py-4 rounded-[20px] transition-all">
+                        📝 이 내용으로 다시 써줘
+                    </button>
+                    <button type="button" onclick="finalizeStory()" id="finalizeBtn" class="w-1/2 bg-amber-400 hover:bg-amber-300 text-lg text-gray-900 font-bold py-4 rounded-[20px] shadow-sm hover:shadow-md hover:scale-[1.02] active:scale-95 transition-all">
+                        🎨 이대로 그림 그리기!
+                    </button>
                 </div>
             </div>
         </div>
@@ -432,7 +702,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <h3 class="text-3xl font-bold text-stone-800 mb-2">동화 생성 시작!</h3>
             <p class="text-stone-500 text-lg mb-6">입력하신 정보로 예쁜 동화를<br>만들 준비를 마쳤어요.</p>
             <button type="button" onclick="closeAlertAndLoad()" class="w-full bg-amber-400 hover:bg-amber-300 text-stone-900 font-bold py-4 rounded-[18px] transition-all text-xl">
-                던전으로 입장하기
+                동화 만들기
             </button>
         </div>
     </div>
@@ -442,6 +712,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let currentSpread = 0;
         let isAnimating = false;
         let spreads = [];
+
+        // 초안 검토 단계에서 쓰는 상태값 (텍스트만 있고 아직 그림은 없는 상태)
+        let currentFairytaleId = null;
+        let draftPages = [];
+        let currentGuideText = "";
 
         // --- 생성될 동화의 언어 선택 (ko/en) ---
         // 이 버튼은 stage3 화면 자체의 언어를 바꾸는 것이 아니라,
@@ -459,8 +734,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             document.getElementById('stage2').classList.add('hidden-stage');
             document.getElementById('stage3').classList.add('hidden-stage');
             document.getElementById('stageLoading').classList.add('hidden-stage');
+            document.getElementById('stageDraft').classList.add('hidden-stage');
             document.getElementById('stageBook').classList.add('hidden-stage');
             document.getElementById('stage' + stageNumber).classList.remove('hidden-stage');
+
+            // 입력 스테이지(1/2/3)에 맞춰 뒷배경도 숲 입구 → 동굴 입구 → 보물의 방으로 전환
+            const backdrop = document.getElementById('sceneBackdrop');
+            if (backdrop) {
+                backdrop.classList.remove('scene-forest', 'scene-cave', 'scene-vault');
+                if (stageNumber === 1) backdrop.classList.add('scene-forest');
+                else if (stageNumber === 2) backdrop.classList.add('scene-cave');
+                else if (stageNumber === 3) backdrop.classList.add('scene-vault');
+            }
         }
 
         function submitForm() {
@@ -469,7 +754,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if(nameInput && nameInput.value) { heroName = nameInput.value; }
         }
 
-        function closeAlertAndLoad() {
+        async function closeAlertAndLoad() {
             document.getElementById('customAlert').classList.add('hidden');
 
             // 던전 테마로 백그라운드 및 컨테이너 스타일 변경 (몰입감 업!)
@@ -480,91 +765,509 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             mainBox.classList.add('bg-black/40', 'border-[#3b2313]/50', 'backdrop-blur-md', 'shadow-[0_0_80px_rgba(0,0,0,0.9)]');
 
             goToStage('Loading');
+            document.getElementById('loadingTitle').innerText = "이야기를 쓰는 중...";
+            
+            // 초안 생성 시에는 가이드 텍스트 숨김
+            const guideContainer = document.getElementById('guideTextContainer');
+            if(guideContainer) {
+                guideContainer.classList.add('hidden');
+                guideContainer.classList.remove('opacity-100');
+            }
+            
             startProgressBar();
+
+            // 1단계: 텍스트 초안만 빠르게 생성합니다. 그림은 아직 그리지 않습니다.
+            // 진행바는 실제 완성 여부와 상관없이 95%에서 멈춰 기다리고,
+            // 생성이 실제로 끝난 뒤에야 100%로 채워집니다.
+            await generateDraft();
+            await finishProgressBar();
+
+            // 초안 검토 단계는 입력 폼(max-w-xl)보다 넓게 보여줘서 이야기를 읽기 편하게 합니다.
+            mainBox.classList.replace('max-w-xl', 'max-w-3xl');
+            goToStage('Draft');
         }
 
+        let _progressInterval = null;
+        let _currentProgress = 0;
+        let isRealtimeStatus = false;
+
+        // 진행률 구간별 안내 문구. 실제 생성이 보통 1~2분 걸리기 때문에,
+        // 각 구간에서 충분히 오래 머무르며 "기다려주세요" 느낌을 주도록 구성했습니다.
+        const LOADING_PHASES = [
+            { at: 0,  phase: "주문 외우는 중... 🔮",              status: "신비로운 동화를 준비하고 있어요" },
+            { at: 25, phase: "고대의 마법 잉크 섞는 중... 🖋️",     status: "보물창고의 비밀을 그리고 있어요. 조금만 기다려주세요" },
+            { at: 50, phase: "삽화를 그리는 중... 🎨",             status: "그림이 절반쯤 완성됐어요. 조금 더 기다려주세요" },
+            { at: 75, phase: "가죽 표지 덮는 중... 📖",            status: "마법의 고서가 거의 완성되었어요!" },
+            { at: 92, phase: "마지막 마법을 새기는 중... ✨",       status: "곧 완성됩니다. 아주 조금만 기다려주세요!" },
+        ];
+
         function startProgressBar() {
-            let progress = 0;
+            _currentProgress = 0;
             const progressBar = document.getElementById('progressBar');
             const progressPercent = document.getElementById('progressPercent');
             const loadingPhase = document.getElementById('loadingPhase');
             const loadingStatusText = document.getElementById('loadingStatusText');
+            let phaseIdx = 0;
 
-            const interval = setInterval(() => {
-                progress += Math.floor(Math.random() * 6) + 1;
-                if(progress > 100) progress = 100;
+            function render() {
+                progressBar.style.width = _currentProgress + '%';
+                progressPercent.innerText = Math.floor(_currentProgress) + '%';
+                while (phaseIdx < LOADING_PHASES.length - 1 && _currentProgress >= LOADING_PHASES[phaseIdx + 1].at) {
+                    phaseIdx++;
+                }
+                loadingPhase.innerText = LOADING_PHASES[phaseIdx].phase;
+                if (!isRealtimeStatus) {
+                    loadingStatusText.innerText = LOADING_PHASES[phaseIdx].status;
+                }
+            }
+            render();
 
-                progressBar.style.width = progress + '%';
-                progressPercent.innerText = progress + '%';
+            // 구간이 올라갈수록 증가 속도를 늦춰서, 실제 생성 시간(약 1~2분)에 맞춰
+            // 25% → 50% → 75% → 92%에서 각각 충분히 머무르다가 서서히 나아가도록 합니다.
+            clearInterval(_progressInterval);
+            _progressInterval = setInterval(() => {
+                let step;
+                if (_currentProgress < 25) step = 1.2;
+                else if (_currentProgress < 50) step = 0.6;
+                else if (_currentProgress < 75) step = 0.35;
+                else if (_currentProgress < 92) step = 0.2;
+                else step = 0.05; // 92% 근처에서는 실제 생성이 끝날 때까지 거의 멈춰서 기다림
 
-                if(progress > 30 && progress < 70) {
-                    loadingPhase.innerText = "고대의 마법 잉크 섞는 중... 🖋️";
-                    loadingStatusText.innerText = "보물창고의 비밀을 그리고 있어요";
-                } else if(progress >= 70 && progress < 100) {
-                    loadingPhase.innerText = "가죽 표지 덮는 중... 📖";
-                    loadingStatusText.innerText = "마법의 고서가 거의 완성되었어요!";
+                // 실시간 상태 메시지가 나오는 '그림 생성' 단계는 매우 오래 걸리므로 속도를 1/4로 줄입니다.
+                if (isRealtimeStatus) {
+                    step = step * 0.25;
                 }
 
-                if (progress === 100) {
-                    clearInterval(interval);
-                    setTimeout(() => {
-                        mainBox.classList.replace('max-w-xl', 'max-w-5xl');
-                        initBookData();
-                        renderStaticSpread();
-                        updateCorners();
-                        goToStage('Book');
-                    }, 800);
-                }
-            }, 120);
+                _currentProgress = Math.min(_currentProgress + step, 95);
+                render();
+            }, 200);
         }
 
-        function initBookData() {
-            // storyLanguage('ko' | 'en')에 따라 실제로 생성되는 동화의 제목과 본문 언어가 달라집니다.
-            const isEn = storyLanguage === 'en';
+        function finishProgressBar() {
+            return new Promise((resolve) => {
+                clearInterval(_progressInterval);
+                _currentProgress = 100;
+                document.getElementById('progressBar').style.width = '100%';
+                document.getElementById('progressPercent').innerText = '100%';
+                document.getElementById('loadingPhase').innerText = "마법의 책이 완성되었어요! 🎉";
+                document.getElementById('loadingStatusText').innerText = "이야기 속으로 들어가볼까요?";
+                setTimeout(resolve, 700);
+            });
+        }
 
-            const title = isEn
-                ? `✨ The Legend of Brave ${heroName} ✨`
-                : `✨ 용감한 ${heroName}의 전설 ✨`;
+        let isFetching = false;
 
-            const texts = isEn ? [
-                `On a bright, clear day, something magical happened to ${heroName}, who lived in a village deep in the forest. Suddenly, a sparkling little fairy appeared and urgently asked for help.`,
-                `The fairy was sad because she had lost the "Starlight Orb" that protected the peace of the forest. The warm-hearted hero decided to help the fairy find it.`,
-                `They pushed through a tangle of thorny bushes and entered a deep cave. Surprisingly, a mischievous goblin was in there, playing catch with the Starlight Orb!`,
-                `${heroName} cleverly challenged the goblin to a fun riddle and won, safely getting the Starlight Orb back and protecting the peace of the forest.`
-            ] : [
-                `어느 맑은 날, 깊은 숲속 마을에 사는 ${heroName}에게 아주 신기한 일이 벌어졌어요. 갑자기 반짝이는 꼬마 요정이 나타나 다급하게 도움을 요청했답니다.`,
-                `요정은 숲의 평화를 지켜주는 "별빛 구슬"을 잃어버려서 슬퍼하고 있었어요. 마음씨 따뜻한 주인공은 기꺼이 요정을 도와 구슬을 찾기로 결심했죠.`,
-                `험난한 가시덤불을 뚫고 깊은 동굴 안으로 들어갔어요. 놀랍게도 그곳에는 장난꾸러기 고블린이 별빛 구슬을 가지고 공놀이를 하고 있었어요!`,
-                `${heroName}은(는) 뛰어난 지혜를 발휘해 고블린에게 재미있는 수수께끼를 내어 승리했고, 무사히 별빛 구슬을 돌려받아 숲의 평화를 지켰답니다.`
-            ];
+        // 아이 프로필 입력값을 백엔드 페이로드 형태로 정리합니다.
+        function collectChildPayload() {
+            const birthYearElement = document.getElementById('birthYearInput');
+            const genderElement = document.querySelector('input[name="gender"]:checked');
 
-            spreads = [
-                {
-                    left: { type: 'empty' },
-                    right: { type: 'cover', title: title, img: 'https://placehold.co/400x500/1a1209/d4a373?text=Legendary+Cover' }
-                },
-                {
-                    left: { type: 'text', text: texts[0] },
-                    right: { type: 'image', img: 'https://placehold.co/400x500/e6d8ba/5c4033?text=Magic+Fairy' }
-                },
-                {
-                    left: { type: 'text', text: texts[1] },
-                    right: { type: 'image', img: 'https://placehold.co/400x500/e6d8ba/5c4033?text=Lost+Orb' }
-                },
-                {
-                    left: { type: 'text', text: texts[2] },
-                    right: { type: 'image', img: 'https://placehold.co/400x500/e6d8ba/5c4033?text=Goblin+Cave' }
-                },
-                {
-                    left: { type: 'text', text: texts[3] },
-                    right: { type: 'image', img: 'https://placehold.co/400x500/e6d8ba/5c4033?text=Victory' }
-                },
-                {
-                    left: { type: 'backcover' },
-                    right: { type: 'empty' }
+            const birthYear = birthYearElement ? parseInt(birthYearElement.value) : NaN;
+            const currentYear = new Date().getFullYear();
+            const computedAge = (!isNaN(birthYear) && birthYear > 1900 && birthYear <= currentYear)
+                ? (currentYear - birthYear)
+                : 5;
+
+            return {
+                name: document.getElementById('heroNameInput').value || "무명",
+                birth_year: (!isNaN(birthYear) && birthYear > 1900 && birthYear <= currentYear) ? birthYear : currentYear - 5,
+                gender: genderElement ? (genderElement.value === 'male' ? "남" : "여") : "기타"
+            };
+        }
+
+        // 동화 조건 입력값을 백엔드 페이로드 형태로 정리합니다.
+        function collectTalePayload() {
+            return {
+                appearance: document.getElementById('appearanceInput').value || "통통하고 귀여움",
+                personality: document.getElementById('personalityInput').value || "활발하고 호기심이 많음",
+                place: document.getElementById('placeInput').value || "신비로운 요정의 숲",
+                time_period: document.getElementById('timePeriodInput').value || "아주 먼 옛날",
+                mood: document.getElementById('moodInput').value || "몽환적이고 따뜻함",
+                problem_situation: document.getElementById('problemTextarea').value || "작은 걱정거리",
+                language: storyLanguage || "ko"
+            };
+        }
+
+        // 1단계: 아이 프로필을 등록하고, 텍스트 초안(그림 없이 4페이지 분량)만 생성합니다.
+        // 백엔드 계약: POST /children/{childId}/fairytales/draft
+        //   응답 예시: { "id": "...", "title": "...", "pages": [{ "text": "..." }, ...] }
+        async function generateDraft() {
+            if (isFetching) {
+                console.log("이미 요청을 처리 중입니다. 중복 요청을 무시합니다.");
+                return;
+            }
+            isFetching = true;
+
+            try {
+                const childRes = await fetch("__BACKEND_URL__/children", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(collectChildPayload())
+                });
+                if (!childRes.ok) throw new Error("아이 프로필 등록 통신 실패");
+                const childData = await childRes.json();
+                const newChildId = childData.id || childData._id;
+
+                const response = await fetch(`__BACKEND_URL__/children/${newChildId}/fairytales/draft`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(collectTalePayload())
+                });
+                if (!response.ok) throw new Error("이야기 초안 생성 통신 실패");
+                const data = await response.json();
+
+                currentFairytaleId = data.id || data._id;
+                draftPages = data.pages || [];
+                currentGuideText = data.guide_text || "";
+                
+                document.getElementById('feedbackLog').innerHTML = '';
+                renderDraftPages(draftPages);
+            } catch (err) {
+                alert("이야기 초안 생성 실패: " + err.message);
+                currentFairytaleId = null;
+                draftPages = [];
+                renderDraftPages(draftPages);
+            } finally {
+                isFetching = false;
+            }
+        }
+
+        // 초안 페이지 텍스트를 화면에 그립니다.
+        function renderDraftPages(pages) {
+            const container = document.getElementById('draftPagesContainer');
+            container.innerHTML = '';
+
+            if (!pages.length) {
+                const empty = document.createElement('p');
+                empty.className = 'text-center text-lg text-stone-400 py-8';
+                empty.textContent = '이야기를 불러오지 못했어요. 이전 단계로 돌아가 다시 시도해주세요.';
+                container.appendChild(empty);
+                return;
+            }
+
+            pages.forEach((page, idx) => {
+                const card = document.createElement('div');
+                card.className = 'bg-stone-50 border border-stone-200 rounded-2xl p-4';
+
+                const label = document.createElement('p');
+                label.className = 'text-sm font-bold text-amber-500 mb-2';
+                label.textContent = (idx + 1) + '페이지';
+
+                const text = document.createElement('p');
+                text.className = 'text-lg text-gray-800 leading-loose whitespace-pre-wrap';
+                text.textContent = page.text;
+
+                card.appendChild(label);
+                card.appendChild(text);
+                container.appendChild(card);
+            });
+        }
+
+        // 이번 요청에서 반영된 피드백 문구를 기록해서 화면에 남겨둡니다(사용자 확인용).
+        function logFeedback(feedback) {
+            const log = document.getElementById('feedbackLog');
+            const entry = document.createElement('p');
+            entry.textContent = '✓ 반영됨: "' + feedback + '"';
+            log.appendChild(entry);
+        }
+
+        // 2단계: 사용자 피드백을 반영해 텍스트 초안을 다시 씁니다.
+        // 백엔드 계약: POST /fairytales/{id}/revise  body: { "feedback": "..." }
+        //   응답 형태는 draft 생성 응답과 동일합니다 ({ id, title, pages }).
+        async function submitFeedback() {
+            const feedbackInput = document.getElementById('feedbackTextarea');
+            const feedback = feedbackInput.value.trim();
+
+            if (!feedback) {
+                alert("어떻게 고치고 싶은지 먼저 적어주세요. 수정할 게 없다면 '이대로 그림 그리기!'를 눌러주세요.");
+                return;
+            }
+            if (!currentFairytaleId || isFetching) return;
+            isFetching = true;
+
+            goToStage('Loading');
+            document.getElementById('loadingTitle').innerText = "이야기를 고치는 중...";
+            startProgressBar();
+
+            try {
+                const response = await fetch(`__BACKEND_URL__/fairytales/${currentFairytaleId}/revise`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ feedback })
+                });
+                if (!response.ok) throw new Error("이야기 수정 통신 실패");
+                const data = await response.json();
+
+                draftPages = data.pages || [];
+                logFeedback(feedback);
+                feedbackInput.value = '';
+                await finishProgressBar();
+                renderDraftPages(draftPages);
+            } catch (err) {
+                alert("이야기 수정 실패: " + err.message);
+            } finally {
+                isFetching = false;
+                goToStage('Draft');
+            }
+        }
+
+        // 3단계: 텍스트가 확정되면 그림을 그리고 최종 동화책(텍스트+이미지)을 받아옵니다.
+        // 백엔드 계약: POST /fairytales/{id}/finalize
+        //   응답 형태는 기존 완성본 조회(GET /fairytales/{id})와 동일합니다
+        //   ({ id, title, content_json: [{ text, image_url, is_cover }, ...] }).
+        async function finalizeStory() {
+            if (!currentFairytaleId || isFetching) return;
+            isFetching = true;
+
+            goToStage('Loading');
+            document.getElementById('loadingTitle').innerText = "삽화를 그리는 중...";
+            const statusText = document.getElementById('loadingStatusText');
+            statusText.innerText = "서버와 연결을 준비 중입니다...";
+            statusText.style.display = 'block'; // 명시적으로 보이게 함
+            
+            // 삽화 생성 단계: 저장해둔 육아 지침 노출
+            const guideContainer = document.getElementById('guideTextContainer');
+            const guideContent = document.getElementById('guideTextContent');
+            if (guideContainer && guideContent && currentGuideText) {
+                guideContent.innerText = currentGuideText;
+                guideContainer.classList.remove('hidden');
+                // 부드러운 나타남 효과
+                setTimeout(() => { guideContainer.classList.add('opacity-100'); }, 100);
+            }
+            
+            isRealtimeStatus = true;
+            startProgressBar();
+
+            try {
+                const response = await fetch(`__BACKEND_URL__/fairytales/${currentFairytaleId}/finalize`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                if (!response.ok) throw new Error("그림 생성 통신 실패");
+                
+                // SSE 스트림 읽기
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder("utf-8");
+                let buffer = "";
+                let finalData = null;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\\n');
+                    buffer = lines.pop(); // 마지막에 덜 끝난 조각만 보관
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (trimmed === '') continue;
+                        if (trimmed.startsWith('data: ')) {
+                            const jsonStr = trimmed.substring(6);
+                            try {
+                                const parsed = JSON.parse(jsonStr);
+                                if (parsed.status === "progress") {
+                                    statusText.innerText = parsed.message;
+                                } else if (parsed.status === "done") {
+                                    finalData = parsed.result;
+                                } else if (parsed.status === "error") {
+                                    throw new Error(parsed.message);
+                                }
+                            } catch(e) {
+                                console.warn("SSE 파싱 에러:", e, "원본:", jsonStr);
+                            }
+                        }
+                    }
                 }
-            ];
-            currentSpread = 0;
+
+                if (!finalData) throw new Error("최종 동화 데이터를 받지 못했습니다.");
+                const data = finalData;
+
+                spreads = buildSpreadsFromFairytale(data);
+                currentSpread = 0;
+
+                const storyId = data.id || data._id;
+                if (storyId) {
+                    saveToHistory({
+                        id: storyId,
+                        title: data.title || "동화책",
+                        heroName: heroName,
+                        language: storyLanguage,
+                        createdAt: new Date().toISOString()
+                    });
+                }
+
+                await finishProgressBar();
+                isRealtimeStatus = false;
+
+                const mainBox = document.getElementById('mainBox');
+                mainBox.classList.remove('max-w-xl', 'max-w-3xl');
+                mainBox.classList.add('max-w-5xl');
+                renderStaticSpread();
+                updateCorners();
+                goToStage('Book');
+            } catch (err) {
+                alert("그림 생성 실패: " + err.message);
+                goToStage('Draft');
+            } finally {
+                isFetching = false;
+                isRealtimeStatus = false;
+            }
+        }
+
+        // fairytale API 응답(data)을 책장 데이터(spreads 배열)로 변환합니다.
+        // 방금 생성한 동화든, 히스토리에서 다시 불러온 동화든 이 함수 하나로 처리합니다.
+        function buildSpreadsFromFairytale(data) {
+            let contentList = [];
+            if (data.content) {
+                // 중요: shift() 호출로 원본 배열이 훼손되는 것을 막기 위해 얕은 복사(Spread)를 사용합니다.
+                contentList = Array.isArray(data.content) ? [...data.content] : [];
+            } else if (data.content_json) {
+                try { contentList = JSON.parse(data.content_json); } catch(e) {}
+            }
+            const result = [];
+
+            let coverImg = 'https://placehold.co/400x500/1a1209/d4a373?text=Cover';
+            if (contentList.length > 0 && (contentList[0].is_cover || contentList[0].page === 0)) {
+                const cover = contentList.shift();
+                coverImg = "http://127.0.0.1:8000" + cover.image_url;
+            }
+
+            result.push({
+                left: { type: 'empty' },
+                right: { type: 'cover', title: data.title || "동화책", img: coverImg }
+            });
+
+            for (let i = 0; i < contentList.length; i++) {
+                const page = contentList[i];
+                result.push({
+                    left: { type: 'text', text: page.text },
+                    right: { type: 'image', img: page.image_url ? "http://127.0.0.1:8000" + page.image_url : 'https://placehold.co/400x500/e6d8ba/5c4033' }
+                });
+            }
+
+            result.push({
+                left: { type: 'backcover' },
+                right: { type: 'empty' }
+            });
+
+            return result;
+        }
+
+        // ------------------------------------------------------------------
+        // 내가 만든 동화 히스토리 (햄버거 메뉴) — 백엔드에 "내 이야기 목록" API가 없어서,
+        // 브라우저 localStorage에 fairytale id/제목만 기록해두고, 열람 시 그 id로
+        // 실제 내용을(GET /fairytales/{id}) 다시 불러오는 방식입니다.
+        // ------------------------------------------------------------------
+        const HISTORY_KEY = 'fairytale_history';
+        const HISTORY_MAX = 30;
+
+        function getHistory() {
+            try {
+                const raw = localStorage.getItem(HISTORY_KEY);
+                return raw ? JSON.parse(raw) : [];
+            } catch (e) {
+                return [];
+            }
+        }
+
+        function saveToHistory(entry) {
+            try {
+                let hist = getHistory().filter(h => h.id !== entry.id);
+                hist.unshift(entry);
+                if (hist.length > HISTORY_MAX) hist = hist.slice(0, HISTORY_MAX);
+                localStorage.setItem(HISTORY_KEY, JSON.stringify(hist));
+            } catch (e) {
+                console.warn('히스토리 저장 실패:', e);
+            }
+        }
+
+        function openHistoryDrawer() {
+            renderHistoryList();
+            document.getElementById('historyOverlay').classList.remove('hidden');
+            document.getElementById('historyDrawer').classList.remove('-translate-x-full');
+        }
+
+        function closeHistoryDrawer() {
+            document.getElementById('historyOverlay').classList.add('hidden');
+            document.getElementById('historyDrawer').classList.add('-translate-x-full');
+        }
+
+        function renderHistoryList() {
+            const container = document.getElementById('historyList');
+            container.innerHTML = '';
+            const hist = getHistory();
+
+            if (hist.length === 0) {
+                const empty = document.createElement('p');
+                empty.className = 'text-center text-stone-400 mt-10 text-sm leading-relaxed';
+                empty.textContent = '아직 만든 동화가 없어요. 첫 번째 이야기를 만들어보세요! ✨';
+                container.appendChild(empty);
+                return;
+            }
+
+            hist.forEach(h => {
+                const dateLabel = h.createdAt
+                    ? new Date(h.createdAt).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })
+                    : '';
+
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'w-full text-left bg-white hover:bg-amber-50 border border-stone-200 hover:border-amber-300 rounded-2xl p-4 transition-all';
+
+                const titleP = document.createElement('p');
+                titleP.className = 'font-bold text-stone-800 truncate';
+                titleP.textContent = h.title || '동화책';
+
+                const metaP = document.createElement('p');
+                metaP.className = 'text-xs text-stone-400 mt-1';
+                metaP.textContent = [h.heroName, dateLabel].filter(Boolean).join(' · ');
+
+                btn.appendChild(titleP);
+                btn.appendChild(metaP);
+                btn.addEventListener('click', () => openHistoryStory(h));
+                container.appendChild(btn);
+            });
+        }
+
+        async function openHistoryStory(entry) {
+            closeHistoryDrawer();
+
+            heroName = entry.heroName || "주인공";
+            storyLanguage = entry.language || 'ko';
+            document.getElementById('langKoBtn').classList.toggle('active', storyLanguage === 'ko');
+            document.getElementById('langEnBtn').classList.toggle('active', storyLanguage === 'en');
+
+            document.body.classList.add('bg-dungeon-theme');
+            const mainBox = document.getElementById('mainBox');
+            mainBox.classList.remove('bg-white', 'border-stone-200', 'shadow-2xl');
+            mainBox.classList.add('bg-black/40', 'border-[#3b2313]/50', 'backdrop-blur-md', 'shadow-[0_0_80px_rgba(0,0,0,0.9)]');
+            mainBox.classList.remove('max-w-xl', 'max-w-3xl');
+            mainBox.classList.add('max-w-5xl');
+
+            goToStage('Loading');
+            document.getElementById('loadingTitle').innerText = "예전 이야기를 펼치는 중...";
+            document.getElementById('loadingStatusText').innerText = "책장을 찾아오고 있어요";
+            document.getElementById('loadingPhase').innerText = "책장을 찾는 중... 📚";
+            document.getElementById('progressPercent').innerText = '';
+            document.getElementById('progressBar').style.width = '70%';
+
+            try {
+                const res = await fetch(`__BACKEND_URL__/fairytales/${entry.id}`);
+                if (!res.ok) throw new Error("이야기를 불러오지 못했어요");
+                const data = await res.json();
+
+                spreads = buildSpreadsFromFairytale(data);
+                currentSpread = 0;
+                document.getElementById('progressBar').style.width = '100%';
+
+                renderStaticSpread();
+                updateCorners();
+                goToStage('Book');
+            } catch (err) {
+                alert("이야기를 불러오지 못했어요: " + err.message);
+                goToStage(1);
+            }
         }
 
         function renderPageHTML(pageData, side) {
@@ -604,9 +1307,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 return `
                 <div class="${baseClass} relative">
                     <div class="absolute inset-5 border border-[#c8aa82] rounded-sm pointer-events-none opacity-60"></div>
-                    <p class="text-[26px] text-[#4a2e15] leading-[2.1] text-justify break-keep px-8 font-medium">
-                        ${pageData.text}
-                    </p>
+                    <div class="relative z-10 w-full h-[85%] overflow-y-auto custom-scrollbar px-8 py-4">
+                        <p class="text-[20px] text-[#4a2e15] leading-[2.1] text-justify break-keep font-medium">
+                            ${pageData.text}
+                        </p>
+                    </div>
                 </div>`;
             }
             if (pageData.type === 'image') {
@@ -766,13 +1471,22 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </html>
 """
 
-components.html(HTML_TEMPLATE, height=980, scrolling=True)
+# HTML 템플릿에 백엔드 주소 및 스테이지별 배경 이미지 주입
+BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000/api")
+FINAL_HTML = (
+    HTML_TEMPLATE.replace("__BACKEND_URL__", BACKEND_URL)
+    .replace("__BG_FOREST__", load_image_data_uri("bg_forest.jpg"))
+    .replace("__SMILE_LOGO__", load_image_data_uri("SMILEimage.png", mime="image/png"))
+    .replace("__BG_CAVE__", load_image_data_uri("bg_cave.jpg"))
+    .replace("__BG_VAULT__", load_image_data_uri("bg_vault.jpg"))
+)
+
+components.html(FINAL_HTML, height=980, scrolling=True)
 
 # ----------------------------------------------------------------------------
 # 책 안의 별점(localStorage)을 몇 초마다 자동으로 확인해서 파일에 동기화
 # ----------------------------------------------------------------------------
 if _SYNC_AVAILABLE:
-    # 2초마다 스크립트를 자동으로 다시 실행시켜, 매번 아래 st_javascript 호출로
     # localStorage 값을 새로 확인합니다. (책 안에서 별을 클릭하면 다음 자동 새로고침 때 반영됩니다)
     _refresh_count = st_autorefresh(interval=2000, key="rating_autorefresh")
 

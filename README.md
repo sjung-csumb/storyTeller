@@ -11,25 +11,13 @@ AI 맞춤형 행동 교정 동화 서비스의 초기 MVP입니다.
 - 문제 상황, 교훈, 분위기, 배경 입력
 - 동화 생성용 프롬프트 미리보기
 
-## 실행 준비
-
-Next.js 실행에는 Node.js 18 이상이 필요합니다.
-
-```bash
-node -v
-```
-
-Node 버전이 18보다 낮다면 먼저 Node를 업데이트해 주세요.
-
 ## 실행 방법
 
-```bash
-npm install
-npm run dev
-
-## 여기 참고-
 streamlit_app_inline.py 사용
-터미널에 streamlit run streamlit_app_inline.py 입력
+
+```bash
+pip install streamlit streamlit-javascript streamlit-autorefresh
+streamlit run streamlit_app_inline.py
 ```
 
 브라우저에서 아래 주소를 열면 됩니다.
@@ -38,12 +26,10 @@ streamlit_app_inline.py 사용
 http://localhost:8501
 ```
 
-## 주의 사항-
-''' 별점 평점 저장하기 위한 설치 코드 
-pip install streamlit streamlit-javascript streamlit-autorefresh
-평점 기록은 satisfaction_ratings.json 에 저장됨
-'''
+## 주의 사항
 
+별점 평점은 위 실행 방법의 패키지(streamlit-javascript, streamlit-autorefresh)가 있어야 저장됩니다.
+평점 기록은 satisfaction_ratings.json 에 저장됨
 ## 다음 단계
 
 - Solar API 연결
