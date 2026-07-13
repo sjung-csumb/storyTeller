@@ -24,3 +24,15 @@ __pycache__/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Custom Ignore for SMILE Project
+node_modules/
+package.json
+package-lock.json
+.vscode/
+.streamlit/
+.pytest_cache/
+.ruff_cache/
+satisfaction_ratings.json
+*.ipynb
+patch*.py

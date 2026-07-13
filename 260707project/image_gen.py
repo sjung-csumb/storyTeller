@@ -39,20 +39,15 @@ def generate_page_image(image_prompt: str, fairytale_id: int, page_num: int) -> 
                 
                 # FastAPI에서 접근할 URL 경로 반환
                 return f"/static/images/{filename}"
-            elif response.status_code == 429:
-                wait_time = 10
-                print(f"[WARN] API 속도 제한 걸림 (Rate Limit). {wait_time}초 후 재시도합니다... (시도 {attempt + 1}/{max_retries})")
-                time.sleep(wait_time)
             else:
-                print(f"[ERROR] 이미지 생성 에러: HTTP {response.status_code}")
-                return ""
+                wait_time = 10
+                print(f"[WARN] 이미지 생성 에러: HTTP {response.status_code}. {wait_time}초 후 재시도합니다... (시도 {attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
                 
         except Exception as e:
             print(f"[ERROR] 네트워크 에러: {e}")
             if attempt < max_retries - 1:
                 time.sleep(10)
-            else:
-                return ""
                 
-    print("[ERROR] 이미지 생성 실패: 최대 재시도 횟수 초과")
-    return ""
+    print("[ERROR] 이미지 생성 실패: 최대 재시도 횟수 초과. 더미 이미지를 반환합니다.")
+    return "https://placehold.co/1024x1024/29160a/cca97e?text=Image+Not+Available"

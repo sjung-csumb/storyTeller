@@ -54,6 +54,3 @@ fairy_tale.db
 scratch/
 static/images/*.png
 *.pdf
-
-# UV specific
-uv.lock

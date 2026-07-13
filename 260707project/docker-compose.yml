@@ -1,6 +1,14 @@
-version: '3.8'
 
 services:
+  mongodb:
+    image: mongo:latest
+    container_name: fairytale_mongodb
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongodb_data:/data/db
+    restart: always
+
   backend:
     build:
       context: .
@@ -8,9 +16,15 @@ services:
     container_name: fairytale_backend
     ports:
       - "8000:8000"
-    # env_file: 
-    #   - .env # 필요시 환경변수 파일 연동
-    restart: unless-stopped
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017
+      - UPSTAGE_API_KEY=${UPSTAGE_API_KEY}
+    depends_on:
+      - mongodb
+    volumes:
+      - ./static:/app/static
+      - ./backup_db:/app/backup_db
+    restart: always
 
   frontend:
     build:
@@ -19,6 +33,25 @@ services:
     container_name: fairytale_frontend
     ports:
       - "8501:8501"
+    environment:
+      - BACKEND_URL=http://127.0.0.1:8000/api
     depends_on:
       - backend
-    restart: unless-stopped
+    restart: always
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: fairytale_ngrok
+    ports:
+      - "4040:4040"
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    command:
+      - "http"
+      - "frontend:8501"
+    depends_on:
+      - frontend
+    restart: always
+
+volumes:
+  mongodb_data:

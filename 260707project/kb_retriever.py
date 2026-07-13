@@ -31,10 +31,8 @@ class UpstageEmbeddingFunction(EmbeddingFunction[Documents]):
 
 
 class FairyTaleRetriever:
-    def __init__(self, data_paths: list = None, db_path: str = "./data/chroma_db"):
-        if data_paths is None:
-            data_paths = ["data/formatted_train.jsonl", "data/formatted_val.jsonl"]
-        self.data_paths = data_paths
+    def __init__(self, db_path: str = "data/guide_chroma_db"):
+        self.db_path = db_path
         
         # OpenAI 클라이언트를 Upstage 엔드포인트로 설정
         api_key = os.environ.get("UPSTAGE_API_KEY")
@@ -50,82 +48,27 @@ class FairyTaleRetriever:
         self.chroma_client = chromadb.PersistentClient(path=db_path)
         self.embedding_fn = UpstageEmbeddingFunction(self.openai_client)
         
-        self.collection = self.chroma_client.get_or_create_collection(
-            name="fairytales", 
-            embedding_function=self.embedding_fn
-        )
-        
-        self._load_data()
-
-    def _load_data(self):
-        """데이터를 파싱하고 Chroma DB에 적재합니다."""
-        # 1. 이미 DB에 데이터가 있는지 확인 (Persistence 장점)
-        existing_count = self.collection.count()
-        if existing_count > 0:
-            print(f"[SUCCESS] KB Retriever: Chroma DB loaded with {existing_count} existing records.")
-            return
-
-        # 2. 비어있다면 소스 파일 파싱 및 임베딩 진행
-        print("Chroma DB is empty. Parsing source files and generating embeddings... This may take a moment.")
-        docs = []
-        metadatas = []
-        ids = []
-        
-        doc_id = 0
-        for path in self.data_paths:
-            if not os.path.exists(path):
-                print(f"Warning: Data file {path} not found. Skipping.")
-                continue
-
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        if not line.strip(): continue
-                        try:
-                            data = json.loads(line.strip())
-                            messages = data.get("messages", [])
-                            
-                            user_query = ""
-                            assistant_response = ""
-                            for msg in messages:
-                                if msg["role"] == "user":
-                                    user_query = msg["content"]
-                                if msg["role"] == "assistant":
-                                    assistant_response = msg["content"]
-                            
-                            if user_query and assistant_response:
-                                docs.append(user_query)
-                                # 메타데이터에는 실제 동화 JSON 텍스트를 통째로 보관합니다.
-                                metadatas.append({"tale": assistant_response})
-                                ids.append(f"doc_{doc_id}")
-                                doc_id += 1
-                                
-                        except Exception:
-                            pass
-            except Exception as e:
-                print(f"Error loading KB data from {path}: {e}")
-
-        if not docs:
-            print("Warning: No valid documents found to add to Chroma DB.")
-            return
-
-        # 3. DB에 일괄 추가 (UpstageEmbeddingFunction이 자동으로 호출됨)
-        # ChromaDB API Limits: 일반적으로 배치를 나눠서 넣는 것이 안전하지만, 300~400개는 한 번에 처리 가능합니다.
-        batch_size = 100
-        for i in range(0, len(docs), batch_size):
-            end_idx = i + batch_size
-            print(f"Adding batch {i} to {end_idx}...")
-            self.collection.add(
-                documents=docs[i:end_idx],
-                metadatas=metadatas[i:end_idx],
-                ids=ids[i:end_idx]
+        try:
+            self.collection = self.chroma_client.get_collection(
+                name="childcare_guide", 
+                embedding_function=self.embedding_fn
             )
-        
-        print(f"[SUCCESS] KB Retriever: Saved {len(docs)} embeddings to Chroma DB.")
+            print(f"[SUCCESS] Expert Guide DB Connected. (Total Docs: {self.collection.count()})")
+        except Exception as e:
+            print(f"[ERROR] Guide DB Connection Failed: {e}. Please run build script first.")
+            
+        try:
+            self.examples_collection = self.chroma_client.get_or_create_collection(
+                name="fairytale_examples",
+                embedding_function=self.embedding_fn
+            )
+            print(f"[SUCCESS] Fairytale Examples DB Connected. (Total Docs: {self.examples_collection.count()})")
+        except Exception as e:
+            print(f"[ERROR] Examples DB Connection Failed: {e}")
 
     def retrieve_few_shot(self, query: str, top_k: int = 1) -> list:
         """
-        주어진 쿼리와 가장 유사한 과거 동화 데이터 반환 (Chroma DB 활용)
+        주어진 쿼리와 가장 유사한 전문가 지침 텍스트 반환 (Chroma DB 활용)
         """
         try:
             results = self.collection.query(
@@ -133,24 +76,86 @@ class FairyTaleRetriever:
                 n_results=top_k
             )
             
-            # 결과에서 메타데이터('tale') 추출
-            tales = []
-            if results['metadatas'] and len(results['metadatas'][0]) > 0:
-                for idx, meta in enumerate(results['metadatas'][0]):
+            # 결과에서 'documents'(전문가 지침 텍스트) 추출
+            guides = []
+            if results['documents'] and len(results['documents'][0]) > 0:
+                for idx, doc in enumerate(results['documents'][0]):
                     distance = results['distances'][0][idx] if 'distances' in results and results['distances'] else 0
                     print(f"  [Chroma Match] Distance: {distance:.3f}")
-                    tales.append(meta["tale"])
+                    guides.append(doc)
                     
-            return tales
+            return guides
         except Exception as e:
             print(f"Error during Chroma semantic retrieval: {e}")
             return []
 
+    def retrieve_example(self, query: str, top_k: int = 1) -> list:
+        """
+        주어진 쿼리(아이 성향/상황)와 가장 유사한 모범 동화 예시를 반환합니다.
+        """
+        try:
+            results = self.examples_collection.query(
+                query_texts=[query],
+                n_results=top_k
+            )
+            
+            examples = []
+            if results['documents'] and len(results['documents'][0]) > 0:
+                for idx, doc in enumerate(results['documents'][0]):
+                    distance = results['distances'][0][idx] if 'distances' in results and results['distances'] else 0
+                    print(f"  [Example Match] Distance: {distance:.3f}")
+                    examples.append(doc)
+            return examples
+        except Exception as e:
+            print(f"Error during Example semantic retrieval: {e}")
+            return []
+            
+    def build_example_db(self, jsonl_path: str):
+        """
+        formatted_human.jsonl 파일을 읽어서 examples_collection에 임베딩합니다.
+        """
+        if not os.path.exists(jsonl_path):
+            print(f"[ERROR] File not found: {jsonl_path}")
+            return
+            
+        print("[INFO] Building Fairytale Examples DB...")
+        documents = []
+        ids = []
+        
+        with open(jsonl_path, 'r', encoding='utf-8') as f:
+            for i, line in enumerate(f):
+                try:
+                    data = json.loads(line)
+                    # assistant의 응답(완성된 동화 JSON) 추출
+                    messages = data.get("messages", [])
+                    if len(messages) >= 2 and messages[1]["role"] == "assistant":
+                        fairytale_json_str = messages[1]["content"]
+                        documents.append(fairytale_json_str)
+                        ids.append(f"example_{i}")
+                except Exception as e:
+                    print(f"[WARN] Error parsing line {i}: {e}")
+                    continue
+                    
+        if documents:
+            # 배치 단위로 추가 (임베딩 API 제한 고려)
+            batch_size = 50
+            for i in range(0, len(documents), batch_size):
+                batch_docs = documents[i:i+batch_size]
+                batch_ids = ids[i:i+batch_size]
+                self.examples_collection.upsert(
+                    documents=batch_docs,
+                    ids=batch_ids
+                )
+                print(f"[INFO] Upserted batch {i//batch_size + 1}")
+            print(f"[SUCCESS] Added {len(documents)} examples to ChromaDB.")
+        else:
+            print("[WARN] No valid examples found in file.")
+
 # Singleton instance
 retriever = None
 
-def get_retriever(data_paths=["data/formatted_train.jsonl", "data/formatted_val.jsonl"]):
+def get_retriever():
     global retriever
     if retriever is None:
-        retriever = FairyTaleRetriever(data_paths=data_paths)
+        retriever = FairyTaleRetriever()
     return retriever

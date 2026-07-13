@@ -2,6 +2,7 @@ import os
 import json
 import json_repair
 import asyncio
+from datetime import datetime
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -19,9 +20,6 @@ load_dotenv()
 
 UPSTAGE_API_KEY = os.environ.get("UPSTAGE_API_KEY")
 
-# =========================================================================
-# 1. 레거시 함수 (유지)
-# =========================================================================
 client = OpenAI(
     api_key=UPSTAGE_API_KEY,
     base_url="https://api.upstage.ai/v1/solar"
@@ -44,7 +42,7 @@ def generate_fairy_tale(
         }
 
     system_prompt = (
-        "너는 아동 심리 발달을 돕는 전문 동화 작가야. "
+        "너는 아동 심리 발달과 행동교정을 돕는 전문 동화 작가야. "
         "주어진 아이의 성향과 교정해야 할 문제 상황을 바탕으로 짧고 교훈적이면서 재미있는 동화를 작성해줘. "
         "**가장 중요한 규칙: 동화는 반드시 기-승-전-결 구조를 갖춘 딱 4페이지로만 구성해야 해.**"
     )
@@ -104,6 +102,7 @@ class GraphState(TypedDict):
     child_info: Dict[str, Any]
     language: str
     rag_context: str
+    guide_text: str
     draft_ko: str
     feedback: Optional[str]
     revision_count: int
@@ -119,15 +118,22 @@ def retrieve_node(state: GraphState) -> GraphState:
     child = state["child_info"]
     problem = child.get("problem_situation", "")
     
-    retriever = get_retriever("data/formatted_val.jsonl")
-    query = f"카테고리: {problem}\n대상 연령: {child.get('age')}세\n주인공 성격: {child.get('personality')}\n"
+    retriever = get_retriever()
+    query = f"아이의 문제 행동: {problem}\n아이의 성향: {child.get('personality')}\n"
     few_shot_results = retriever.retrieve_few_shot(query, top_k=1)
+    example_results = retriever.retrieve_example(query, top_k=1)
     
     rag_context = ""
+    guide_text = ""
     if few_shot_results:
-        rag_context = f"--- [레퍼런스 (참고용 동화 예시)] ---\n{few_shot_results[0]}\n"
+        raw_guide = few_shot_results[0]
+        rag_context += f"--- [보건복지부 아동 심리 전문가 지침] ---\n{raw_guide}\n\n위 지침을 참고하여, 아이의 행동 교정을 돕는 구체적인 대안 행동이 동화 속에 자연스럽게 포함되도록 작성해.\n\n"
+        guide_text = ""
         
-    return {"rag_context": rag_context, "revision_count": 0}
+    if example_results:
+        rag_context += f"--- [모범 동화 예시 (스타일/분량 참고용)] ---\n{example_results[0]}\n\n위 모범 예시의 문체, 문장 길이, 4페이지 분할 구조를 적극 참고해. 단, 예시가 JSON 형태더라도 너는 절대로 JSON 포맷으로 출력하지 말고, '순수한 텍스트 문단'으로만 4개의 단락(각 페이지)을 작성해.\n"
+        
+    return {"rag_context": rag_context, "guide_text": guide_text, "revision_count": 0}
 
 def draft_node(state: GraphState) -> GraphState:
     child = state["child_info"]
@@ -135,11 +141,21 @@ def draft_node(state: GraphState) -> GraphState:
     gender = child.get("gender", "무관")
     name = child.get("name", "아이")
     
-    if age <= 4:
-        age_rule = "3~4세 유아를 타겟으로 하므로, 아주 쉬운 어휘와 짧은 문장을 사용하고 의성어/의태어를 듬뿍 넣어서 아기자기하게 작성해."
+    if age <= 3:
+        vocab_rule = f"입력된 {age}세 아동의 인지 수준에 맞춰 '포탈' 대신 '비밀 문' 등 아주 쉽고 직관적인 단어를 써. 영유아의 흥미를 끌 수 있도록 각 페이지마다 '사각사각', '몽글몽글' 같은 생동감 넘치는 의성어/의태어를 2개 이상씩 듬뿍 포함해. 특히 배경이나 문맥에서 '유치원'이라는 단어는 절대 쓰지 말고 무조건 '어린이집'으로 고정해."
+    elif age == 4:
+        vocab_rule = f"입력된 {age}세 아동의 인지 수준에 맞춰 '포탈' 대신 '비밀 문' 등 아주 쉽고 직관적인 단어를 써. 영유아의 흥미를 끌 수 있도록 각 페이지마다 '사각사각', '몽글몽글' 같은 생동감 넘치는 의성어/의태어를 2개 이상씩 듬뿍 포함해."
     else:
-        age_rule = "5~6세 아동을 타겟으로 하므로, 조금 더 논리적인 인과관계와 성숙한 어휘를 사용하고 교훈을 담아줘."
-        
+        vocab_rule = f"입력된 {age}세 아동의 어휘 수준에 맞춘 단어와 문장 구조를 사용해. 동화가 너무 유치해지지 않도록 각 페이지마다 연령대에 맞는 적절한 의성어/의태어를 1개 정도만 자연스럽게 포함해."
+    length_rule = "아동이 읽기 편하도록 1쪽은 자유롭게 작성하되, 2쪽, 3쪽, 4쪽의 텍스트는 각각 무조건 정확히 '4문장'으로만 고정해서 작성해."
+    resolution_rule = "조력자(부모, 코치, 선생님 등)의 따뜻한 스킨십이나 '어떻게 하면 좋을까?'라는 질문을 통해 아이 스스로 대안을 찾고 안정을 얻도록 유도해."
+
+    lang_val = state.get("language", "ko").lower()
+    if lang_val == "en":
+        lang_rule = "미국의 양육자와 아이가 일상에서 쓰는 다정하고 자연스러운 구어체를 사용해. **반드시 이야기 전체 텍스트를 영문(English)으로 작성해!**"
+    else:
+        lang_rule = "한국의 양육자와 아이가 일상에서 쓰는 다정하고 자연스러운 구어체(~해요, ~했어요)를 사용해. 한국어로 작성해."
+
     if gender == "남자":
         gender_rule = "스토리에 모험심을 자극하고 활동적인 전개(탐험, 문제 해결 등)를 살짝 섞어주면 좋아."
     elif gender == "여자":
@@ -148,22 +164,29 @@ def draft_node(state: GraphState) -> GraphState:
         gender_rule = "아이의 성향에 맞추어 전개해."
         
     system_prompt = (
-        "너는 아동 심리 발달을 돕는 다정하고 창의적인 전문 구연동화 작가야. "
-        "주어진 아이의 성향과 교정해야 할 문제 상황을 바탕으로 짧고 교훈적이면서 재미있는 동화를 작성해줘. "
-        "**[이야기(text) 작성 규칙]**\n"
-        "0. **[치명적 규칙]** 모든 텍스트 작성 시 절대로 쌍따옴표(\")를 사용하지 마! 무조건 작은따옴표(')만 사용해!\n"
-        f"1. {age_rule}\n2. {gender_rule}\n"
-        f"3. 대화체는 한국 부모와 아이가 실제로 쓰는 자연스러운 구어체를 사용해 (예: '우리 {name} 기분이 어때?').\n"
-        "4. 상황 묘사 시 주변 사물/동물에 빗댄 직관적 비유와 의성어/의태어를 그 동화 내용에 맞게 창작해.\n"
-        "5. 아이의 감정을 신체적 반응으로 묘사하고, 입에 달라붙는 짧고 리듬감 있는 문구를 반복 삽입해.\n"
-        "6. 각 페이지의 텍스트는 최소 2~3문장 이상으로 풍성하게 써! 개연성 있게 감정선을 묘사해.\n"
-        "7. 4페이지 동안 '문제 발생 -> 마음 알아주기 -> 깨달음 -> 교훈'의 흐름이 물 흐르듯 이어지도록 해.\n"
-        "8. 만약 꿈속 모험 이야기라면 마지막에 반드시 잠에서 깨어나 교훈을 부모님께 직접 말하며 실천하는 장면을 넣어."
+        "🚨 CRITICAL RULE: 이 동화는 반드시 4페이지(단락)로 끝나야 합니다. 5페이지나 6페이지를 절대로 생성하지 마십시오!\n\n"
+        "너는 아동 심리 발달을 돕는 다정하고 창의적인 구연동화 작가야. "
+        "주어진 아이의 성향과 문제 상황을 바탕으로, 아이의 행동 개선과 올바른 습관 형성을 돕는 4쪽짜리 맞춤형 동화를 제작해줘.\n"
+        "**[사용자 입력값 해석 및 치환 규칙]**\n"
+        "1. [문제 상황]에 '내 말을 안 들어서 실망했다'고 적혀 있다면: 아이가 그 행동을 하지 않았을 때 현실(어린이집 등)에서 겪게 될 '실제적 불편함이나 결과'(예: 내일 준비물이 없으면 네가 당황할 거야)를 인지시켜주는 방향으로 치환해.\n"
+        "2. [문제 상황]에 '거짓말을 고쳐달라'고 적혀 있다면: 거짓말을 징벌하는 서사는 피하고, '거짓말을 하지 않고 솔직하게 말했을 때 얻는 용기와 칭찬(긍정적 강화)'에 초점을 맞춰 전개해.\n\n"
+        "**[이야기 작성 필수 규칙]**\n"
+        "1. **[사실관계 및 장소 강제 보존]** [문제 상황]의 사실관계를 왜곡하지 마. [배경(장소)]을 무조건 이야기의 메인 무대로 사용해.\n"
+        "2. **[문장 부호 및 따옴표 규칙]** 모든 문장은 마침표(.), 물음표(?), 느낌표(!)로 완벽하게 끝맺어. 텍스트 작성 시 쌍따옴표(\")는 절대 금지! 대화는 무조건 작은따옴표(')만 사용해.\n"
+        f"3. **[주인공]** 주인공 이름은 '{name}'(으)로 고정해.\n"
+        f"4. **[문체 및 어투]** {vocab_rule} {gender_rule} {lang_rule} 기계적인 번역투나 딱딱한 문장은 절대 금지!\n"
+        f"5. **[분량 조절]** {length_rule}\n"
+        f"6. **[기승전결 서사 및 결말 템플릿]** 1쪽(배경 및 호기심 유발) -> 2쪽(문제 행동 발생 및 조력자의 공감) -> 3쪽(지침을 활용한 대안 행동 시도) -> 4쪽(행동 변화 다짐) 구조로 전개해. 해결 과정에서는 {resolution_rule}\n"
+        "   **[4쪽 결말 유연화 템플릿]** 꿈이면 깨어나 안기고, 현실이면 조력자와 훈훈하게 마무리해.\n"
+        "7. **[정서적 협박 금지 및 100% 수용]** 아이에게 '엄마가 슬프다, 실망했다, 마음이 아프다'는 부정적 감정을 무기로 행동을 통제하지 마. 또한 아이의 잘못을 무섭게 추궁(~했지?)하거나 지적하지 말고, '귀찮았구나'라며 아이의 감정을 100% 수용(Validate)한 후 긍정적 대안 행동과 칭찬(긍정적 자아 강화)으로 유도해.\n"
+        "8. **[놀이식 행동 시뮬레이션 필수 포함]** 문제 해결 과정(가방 싸기, 양치 등)을 지루한 숙제가 아닌 사물(스티커, 크레파스 등)을 활용한 '재미있는 놀이'나 '시합'처럼 묘사해! 아이가 즉각적으로 따라 할 수 있는 구체적 행동 가이드를 자연스럽게 녹여내.\n"
+        "9. **[바른 언어 및 금지 묘사]** 신체 부위를 묘사할 때 '이빨'이라는 표현은 절대 금지하고 반드시 '이' 또는 '치아'라고 써. 치약을 삼켜도 괜찮다는 식의 오인할 수 있는 묘사도 절대 금지해.\n"
+        "10. **[사족 및 지시문 절대 금지]** 각 페이지 시작은 무조건 '[1페이지]' 등으로 시작해. '제목:', '등장인물:' 같은 대본 형식 금지. 이야기 끝에 '(전문가 팁: ...)' 같은 육아가이드나 해설을 절.대. 생성하지 마. 오직 동화 텍스트 4쪽만 출력해.\n"
+        "11. **[최종 맞춤법 자체 검수]** 본문의 마침표(.)를 찍고 끝내기 직전 스스로 오탈자 검수 후 완벽히 교정된 텍스트만 출력해."
     )
     
     user_msg = (
         f"주인공 이름: {name}, 나이: {age}세, 성별: {gender}\n"
-        f"외형: {child.get('appearance')}\n"
         f"성격: {child.get('personality')}\n"
         f"배경: {child.get('place')} / {child.get('time_period')}\n"
         f"분위기: {child.get('mood')}\n"
@@ -220,8 +243,11 @@ def format_node(state: GraphState) -> GraphState:
         "1. Create an English `cover_image_prompt` that includes the character's age, gender, and appearance.\n"
         "2. Create an English `image_prompt` for EACH page based on its text.\n"
         "   - Structure: [Fixed Character Description translated to English] + [Action/Objects for the page] + [Simple background] + [, consistent character design, simple background, in watercolor children's book illustration style]\n"
+        "   - If parents(mother/father) or adults appear, EXPLICITLY describe them as adults (e.g., 'a 30-year-old adult woman', 'an adult man') so they are not drawn as children or siblings.\n"
         "   - NEVER use quotes inside the image_prompt.\n"
-        "3. **CRITICAL RULE**: Do NOT translate or change the language of the story text or title. You MUST keep the 'title' and 'text' fields in their EXACT ORIGINAL LANGUAGE (Korean or English) as provided in the Story Text.\n\n"
+        "3. **Generate a short Title**: Read the story text and generate a creative, short Title for the story in its original language (max 5 words). Do NOT put the whole story text into the title.\n"
+        "4. **CRITICAL RULE**: Do NOT translate or change the language of the story text or title. You MUST keep the 'title' and 'text' fields in their EXACT ORIGINAL LANGUAGE (Korean or English) as provided in the Story Text.\n"
+        "5. **CRITICAL RULE**: The story MUST be divided into EXACTLY 4 pages. Your JSON `content` array MUST contain EXACTLY 4 items. Do not split the story into 5, 6, or any other number of pages.\n\n"
         f"{parser.get_format_instructions()}"
     )
     
@@ -249,56 +275,43 @@ def format_node(state: GraphState) -> GraphState:
             # Ultimate fallback
             return {"final_json": response.content}
 
-# --- Graph Assembly ---
-
-def route_review(state: GraphState) -> str:
+# --- Graph Assembly 1: Draft & Revise ---
+def route_draft_review(state: GraphState) -> str:
     if state["feedback"] == "PASS":
-        return "translate"
+        return END
     return "draft"
 
-workflow = StateGraph(GraphState)
-workflow.add_node("retrieve", retrieve_node)
-workflow.add_node("draft", draft_node)
-workflow.add_node("review", review_node)
-workflow.add_node("translate", translate_node)
-workflow.add_node("format", format_node)
+draft_workflow = StateGraph(GraphState)
+draft_workflow.add_node("retrieve", retrieve_node)
+draft_workflow.add_node("draft", draft_node)
+draft_workflow.add_node("review", review_node)
 
-workflow.add_edge(START, "retrieve")
-workflow.add_edge("retrieve", "draft")
-workflow.add_edge("draft", "review")
-workflow.add_conditional_edges("review", route_review, {"draft": "draft", "translate": "translate"})
-workflow.add_edge("translate", "format")
-workflow.add_edge("format", END)
+draft_workflow.add_edge(START, "retrieve")
+draft_workflow.add_edge("retrieve", "draft")
+draft_workflow.add_edge("draft", "review")
+draft_workflow.add_conditional_edges("review", route_draft_review)
 
-fairy_tale_app = workflow.compile()
+draft_app = draft_workflow.compile()
+
+# --- Graph Assembly 2: Finalize ---
+finalize_workflow = StateGraph(GraphState)
+finalize_workflow.add_node("translate", translate_node)
+finalize_workflow.add_node("format", format_node)
+
+finalize_workflow.add_edge(START, "translate")
+finalize_workflow.add_edge("translate", "format")
+finalize_workflow.add_edge("format", END)
+
+finalize_app = finalize_workflow.compile()
 
 # =========================================================================
-# 3. 메인 인터페이스 함수
+# 3. 메인 인터페이스 함수 (V2)
 # =========================================================================
-def generate_fairy_tale_with_rag(
-    child: Child,
-    appearance: str,
-    personality: str,
-    place: str,
-    time_period: str,
-    mood: str,
-    problem_situation: str,
-    language: str = "ko"
-) -> dict:
-    """
-    LangGraph Agentic Workflow를 사용하여 동화를 생성합니다.
-    """
-    if not UPSTAGE_API_KEY:
-        dummy_content = [{"page": 1, "text": f"{child.name}는 {problem_situation} 문제를 겪고 있었어요."}]
-        return {
-            "title": f"{child.name}의 가짜 동화 (RAG 모드)",
-            "content_json": json.dumps(dummy_content, ensure_ascii=False),
-            "cover_image_prompt": "A beautiful storybook cover art"
-        }
 
+def build_initial_state(child: Any, appearance: str, personality: str, place: str, time_period: str, mood: str, problem_situation: str, language: str) -> dict:
     child_info = {
         "name": child.name,
-        "age": child.age,
+        "age": datetime.now().year - child.birth_year,
         "gender": child.gender,
         "appearance": appearance,
         "personality": personality,
@@ -307,18 +320,115 @@ def generate_fairy_tale_with_rag(
         "mood": mood,
         "problem_situation": problem_situation
     }
+    return {
+        "child_info": child_info,
+        "language": language,
+        "feedback": None,
+        "revision_count": 0,
+        "guide_text": ""
+    }
+
+def generate_draft_text(child: Any, appearance: str, personality: str, place: str, time_period: str, mood: str, problem_situation: str, language: str = "ko") -> tuple[str, str]:
+    """초안 텍스트 생성"""
+    if not UPSTAGE_API_KEY:
+        return f"가짜 텍스트 초안입니다. (API KEY 필요)\n\n문제 상황: {problem_situation}", "가짜 지침입니다."
+        
+    initial_state = build_initial_state(child, appearance, personality, place, time_period, mood, problem_situation, language)
+    print(f"Starting Draft Agent for {child.name}...")
+    result = draft_app.invoke(initial_state)
+    return result["draft_ko"], result.get("guide_text", "")
+
+def revise_draft_text(child: Any, appearance: str, personality: str, place: str, time_period: str, mood: str, problem_situation: str, language: str, feedback: str) -> tuple[str, str]:
+    """피드백 기반 텍스트 수정"""
+    if not UPSTAGE_API_KEY:
+        return f"피드백이 반영된 가짜 텍스트입니다: {feedback}", "가짜 지침입니다."
+        
+    initial_state = build_initial_state(child, appearance, personality, place, time_period, mood, problem_situation, language)
+    initial_state["feedback"] = feedback  # 피드백 주입
+    print(f"Starting Revise Agent for {child.name} with feedback: {feedback}...")
+    result = draft_app.invoke(initial_state)
+    return result["draft_ko"], result.get("guide_text", "")
+
+def finalize_story_json(child: Any, appearance: str, language: str, final_text: str) -> dict:
+    """텍스트 확정 후 영문 번역 및 이미지 프롬프트 추출 (포맷팅)"""
+    if not UPSTAGE_API_KEY:
+        return {
+            "title": "가짜 동화 완성",
+            "cover_image_prompt": "Fake cover art",
+            "content_json": "[]"
+        }
+    
+    # finalize 에서는 child_info 중 외형 정보만 주로 필요함
+    child_info = {
+        "name": child.name,
+        "appearance": appearance
+    }
     
     initial_state = {
         "child_info": child_info,
-        "language": language
+        "language": language,
+        "draft_ko": final_text
     }
     
+    print("Starting Finalize Agent (Translate & Format)...")
+    result = finalize_app.invoke(initial_state)
+    
+    final_json_str = result.get("final_json", "{}")
     try:
-        # LangGraph Workflow 동기 실행 (FastAPI 라우트가 동기이므로 app.invoke 사용)
-        print(f"Starting Multi-Agent generation for {child.name} (Lang: {language})...")
-        result = fairy_tale_app.invoke(initial_state)
+        parsed_obj = json.loads(final_json_str)
+        return {
+            "title": parsed_obj.get("title", f"{child.name}의 이야기"),
+            "cover_image_prompt": parsed_obj.get("cover_image_prompt", ""),
+            "content_json": json.dumps(parsed_obj.get("content", []), ensure_ascii=False)
+        }
+    except Exception:
+        return {
+            "title": "Parsing Error",
+            "cover_image_prompt": "",
+            "content_json": "[]"
+        }
+
+# =========================================================================
+# 4. 레거시 메인 인터페이스 함수 (V1 원샷 API 용도)
+# =========================================================================
+
+def route_review(state: GraphState) -> str:
+    if state["feedback"] == "PASS":
+        return "translate"
+    return "draft"
+
+legacy_workflow = StateGraph(GraphState)
+legacy_workflow.add_node("retrieve", retrieve_node)
+legacy_workflow.add_node("draft", draft_node)
+legacy_workflow.add_node("review", review_node)
+legacy_workflow.add_node("translate", translate_node)
+legacy_workflow.add_node("format", format_node)
+
+legacy_workflow.add_edge(START, "retrieve")
+legacy_workflow.add_edge("retrieve", "draft")
+legacy_workflow.add_edge("draft", "review")
+legacy_workflow.add_conditional_edges("review", route_review, {"draft": "draft", "translate": "translate"})
+legacy_workflow.add_edge("translate", "format")
+legacy_workflow.add_edge("format", END)
+
+fairy_tale_app_legacy = legacy_workflow.compile()
+
+def generate_fairy_tale_with_rag(child: Any, appearance: str, personality: str, place: str, time_period: str, mood: str, problem_situation: str, language: str = "ko") -> dict:
+    """기존 V1 원샷 API를 위한 레거시 호환 함수"""
+    if not UPSTAGE_API_KEY:
+        dummy_content = [{"page": 1, "text": f"{child.name}는 {problem_situation} 문제를 겪고 있었어요."}]
+        return {
+            "title": f"{child.name}의 가짜 동화 (RAG 모드)",
+            "content_json": json.dumps(dummy_content, ensure_ascii=False),
+            "cover_image_prompt": "A beautiful storybook cover art"
+        }
+
+    initial_state = build_initial_state(child, appearance, personality, place, time_period, mood, problem_situation, language)
+    
+    try:
+        print(f"Starting Legacy Multi-Agent generation for {child.name} (Lang: {language})...")
+        result = fairy_tale_app_legacy.invoke(initial_state)
         
-        # Parse output JSON string back to dict for the API response format
         final_json_str = result.get("final_json", "{}")
         parsed_obj = json.loads(final_json_str)
         
@@ -331,7 +441,6 @@ def generate_fairy_tale_with_rag(
             "cover_image_prompt": cover_prompt,
             "content_json": json.dumps(content_array, ensure_ascii=False)
         }
-        
     except Exception as e:
         print(f"Agentic Workflow Error: {e}")
         return {
