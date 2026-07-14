@@ -1,0 +1,79 @@
+schema_version: 1
+
+team:
+  number:            # 작성 필요 (팀 번호)
+  folder_name: teamXX-smile   # 작성 필요 (예: team01-smile)
+  name: smile
+  members:
+    - name: 정석찬
+      role: PM
+      github: taptox1111@gmail.com      # GitHub ID로 교체 권장
+    - name: 유형민
+      role: Backend, Data
+      github: cysg0810@gmail.com         # GitHub ID로 교체 권장
+    - name: 박시온
+      role: Frontend, Design
+      github: zion6182@gmail.com         # GitHub ID로 교체 권장
+    - name: 김태규
+      role: AI, Backend
+      github: KimtaeGyu
+
+project:
+  title: SMILE — 행동 교정 맞춤 동화 생성 서비스
+  summary: 아이의 문제 상황과 성격을 입력하면, 행동 교정을 돕는 맞춤형 그림동화를 생성해주는 AI 서비스입니다.
+  category: AI 서비스
+  keywords:
+    - AI
+    - RAG
+    - 동화 생성
+    - 아동 행동교정
+    - 멀티에이전트
+
+problem:
+  summary: 부모가 아이의 문제 행동(편식·때리기·떼쓰기 등)을 정서적 협박 없이 효과적으로 교정하기 어렵습니다.
+  target_users:
+    - 만 3~7세 영유아 자녀를 둔 부모·양육자
+    - 영유아 교육기관(어린이집·유치원) 교사
+
+solution:
+  summary: 보건복지부 전문가 지침을 RAG로 검색해 '원칙'만 추출하고, 아이의 상황에 맞는 동화로 재창작합니다.
+  main_features:
+    - 아이 맞춤 기승전결 4페이지 동화 생성
+    - RAG 기반 전문가 지침 적용 (원칙 이식, 정서적 협박·공포 배제)
+    - 멀티에이전트 자동 검수 (금지 표현·분량·회피형 결말 차단)
+    - Human-in-the-Loop 첨삭 + 평점 4점↑ 피드백 선순환
+    - 페이지별 삽화 자동 생성
+
+tech_stack:
+  frontend:
+    - Streamlit
+  backend:
+    - FastAPI
+    - Uvicorn
+  ai:
+    - Upstage Solar (solar-pro3 / solar-pro2 / embedding)
+    - LangGraph
+    - LangChain
+    - ChromaDB (RAG)
+    - Pollinations AI (이미지 생성)
+  database:
+    - MongoDB (Beanie ODM)
+  infra:
+    - Docker
+    - docker-compose
+    - ngrok
+
+links:
+  demo_video_url:        # 작성 필요
+  deployed_url:          # 작성 필요 (Docker Compose + ngrok URL)
+  presentation_url:      # 작성 필요
+  repository_url: https://github.com/sjung-csumb/storyTeller
+
+blog:
+  slug: smile
+  tags:
+    - AI
+    - RAG
+    - 동화생성
+    - 강원대 부트캠프
+  cover_image: assets/cover.png   # 작성 필요 (커버 이미지 경로)
