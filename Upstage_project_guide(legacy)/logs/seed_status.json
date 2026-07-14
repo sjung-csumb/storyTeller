@@ -1,0 +1,1 @@
+{"status": "error", "current": 0, "total": 0, "message": "Failed to add documents: 'EmbeddingService' object has no attribute '_embeddings'"}
