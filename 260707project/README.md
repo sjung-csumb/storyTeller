@@ -19,8 +19,11 @@
 ## 주요 기능
 
 - **맞춤형 동화 생성** — 아이의 이름·나이·성별·성격·문제 상황·배경을 반영한 기승전결 4페이지 동화
-- **RAG 기반 전문가 지침 적용** — ChromaDB에서 아동 심리 지침·모범 동화를 검색해 이야기에 자연스럽게 반영
-- **멀티에이전트 자동 검수** — `retrieve → draft → review` 루프로 금지 표현(공포·죄책감 유발)·분량·배경 반영을 자동 검증 (최대 3회 재시도)
+- **RAG 기반 전문가 지침 적용** — ChromaDB에서 아동 심리 지침을 검색(문서=passage / 질의=query 비대칭 임베딩)해 이야기에 자연스럽게 반영
+- **분위기 기반 예시 매칭** — 대상 연령·분위기로 모범 동화 예시를 검색해 문체/분량 참고 (플롯 차용은 금지)
+- **멀티에이전트 자동 검수** — `retrieve → draft → review` 루프로 금지 표현(공포·죄책감)·분량·배경 반영에 더해, **결말에서 목표 행동을 실제로 수행했는지(회피형 결말 차단)를 LLM으로 검사** (최대 3회 재시도)
+- **문장부호 자동 보정** — 모델이 문장부호를 누락하는 경우를 감지해 보정
+- **피드백 선순환** — 사용자 별점 **4점 이상** 동화를 예시 풀로 승격해 이후 생성 품질을 높임
 - **Human-in-the-Loop** — 초안 확인 → 피드백 수정 → 확정의 3단계 파이프라인
 - **삽화 자동 생성** — 페이지별 이미지 프롬프트를 추출해 일관된 화풍의 그림 생성
 - **연령별 어휘/문체 튜닝** — 만 3세 이하/4세/그 이상에 따라 어휘·의성어 규칙 차등 적용
@@ -38,7 +41,8 @@
 
 ![기술 스택 계층](diagrams/TECH_STACK-1.png)
 
-> 전체 플로우 차트는 [`FLOWCHART.md`](FLOWCHART.md), 기술 스택 상세는 [`TECH_STACK.md`](TECH_STACK.md)를 참고하세요.
+> 전체 플로우 차트는 [`FLOWCHART.md`](FLOWCHART.md), 기술 스택 상세는 [`TECH_STACK.md`](TECH_STACK.md),
+> RAG 검색 성능 개선 과정은 [`WALKTHROUGH.md`](WALKTHROUGH.md)를 참고하세요.
 > (렌더링된 다이어그램 이미지는 [`diagrams/`](diagrams/) 폴더에 PNG/SVG로 제공됩니다.)
 
 ---
@@ -65,14 +69,22 @@
 ```
 260707project/
 ├── main.py              # FastAPI 진입점 / API 라우터
-├── llm.py               # LangGraph 멀티에이전트 (retrieve→draft→review→format)
-├── kb_retriever.py      # ChromaDB RAG 검색 (전문가 지침 + 모범 동화)
-├── image_gen.py         # Stable Diffusion AI 삽화 생성
+├── llm.py               # LangGraph 멀티에이전트 + 결말 실천 검사 + 문장부호 보정
+├── kb_retriever.py      # ChromaDB RAG 검색 (지침=passage/query, 예시=분위기 매칭)
+├── image_gen.py         # Pollinations AI 삽화 생성 (무료, 키 불필요)
 ├── models.py            # Beanie 문서 모델 (Child / FairyTale / Feedback)
 ├── schemas.py           # Pydantic 요청·응답 스키마
 ├── database.py          # MongoDB(Beanie) 초기화
 ├── streamlit_app_inline.py  # Streamlit 프론트엔드
-├── data/guide_chroma_db/    # 사전 구축된 ChromaDB 벡터 스토어
+├── scripts/                  # 오프라인 데이터 파이프라인
+│   ├── build_guide_chroma.py       # 전문가 PDF → passage 색인
+│   ├── reembed_passage.py          # 기존 청크 passage 재색인
+│   ├── eval_rag.py                 # RAG 검색 A/B 평가
+│   ├── label_examples.py           # 예시 라벨(연령·분위기) 생성
+│   ├── build_example_index.py      # 예시 조건키 색인
+│   ├── build_golden_examples.py    # 골든 예시 생성·교체
+│   └── promote_rated_to_examples.py # 평점 4점+ 동화 → 예시 승격(피드백 루프)
+├── data/guide_chroma_db/    # ChromaDB (childcare_guide + fairytale_examples)
 ├── static/images/           # 생성된 삽화 저장 경로
 ├── docker-compose.yml       # mongodb / backend / frontend / ngrok
 ├── Dockerfile.backend
@@ -90,7 +102,6 @@
 
 ```dotenv
 UPSTAGE_API_KEY=your_upstage_api_key
-HUGGING_FACE_API_KEY=your_hugging_face_api_key
 MONGODB_URI=mongodb://localhost:27017      # 또는 MongoDB Atlas 연결 문자열
 NGROK_AUTHTOKEN=your_ngrok_token           # (선택) 외부 노출 시
 ```
@@ -100,7 +111,6 @@ NGROK_AUTHTOKEN=your_ngrok_token           # (선택) 외부 노출 시
 | `UPSTAGE_API_KEY`     |  ✅  | Upstage Solar LLM · 임베딩 API 키 |
 | `MONGODB_URI`         |  ✅  | MongoDB 연결 문자열               |
 | `NGROK_AUTHTOKEN`     |  ⬜  | ngrok 외부 터널링용 토큰          |
-| `HUGGINGFACE_API_KEY` |  ⬜  | Stable Diffusion API 키           |
 
 ### 방법 1. Docker Compose (권장)
 

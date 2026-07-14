@@ -58,7 +58,10 @@ def main():
         api_key=os.environ.get("UPSTAGE_API_KEY"),
         base_url="https://api.upstage.ai/v1/solar"
     )
-    embedding_func = UpstageEmbeddingFunction(client=upstage_client)
+    # 문서(청크)는 passage 모델로 색인해야 검색 정확도가 높다 (질의는 query 모델).
+    embedding_func = UpstageEmbeddingFunction(
+        client=upstage_client, model_name="solar-embedding-1-large-passage"
+    )
     
     chroma_client = chromadb.PersistentClient(path=DB_PATH)
     collection = chroma_client.get_or_create_collection(

@@ -46,12 +46,22 @@ class FairyTaleRetriever:
         
         # Chroma DB 클라이언트 및 컬렉션 세팅
         self.chroma_client = chromadb.PersistentClient(path=db_path)
-        self.embedding_fn = UpstageEmbeddingFunction(self.openai_client)
-        
+        # Upstage 임베딩은 문서용(passage)과 질의용(query) 모델이 분리되어 있다.
+        # 색인(문서)은 passage, 검색(질의)은 query 모델을 써야 검색 정확도가 올라간다.
+        # (scripts/eval_rag.py A/B 평가로 검증: Hit@1 0.81 → 0.87)
+        self.doc_embedding_fn = UpstageEmbeddingFunction(
+            self.openai_client, model_name="solar-embedding-1-large-passage"
+        )
+        self.query_embedding_fn = UpstageEmbeddingFunction(
+            self.openai_client, model_name="solar-embedding-1-large-query"
+        )
+        # 하위 호환: 문서 추가(build_example_db 등) 시 passage 모델을 기본으로 사용
+        self.embedding_fn = self.doc_embedding_fn
+
         try:
             self.collection = self.chroma_client.get_collection(
-                name="childcare_guide", 
-                embedding_function=self.embedding_fn
+                name="childcare_guide",
+                embedding_function=self.doc_embedding_fn
             )
             print(f"[SUCCESS] Expert Guide DB Connected. (Total Docs: {self.collection.count()})")
         except Exception as e:
@@ -60,7 +70,7 @@ class FairyTaleRetriever:
         try:
             self.examples_collection = self.chroma_client.get_or_create_collection(
                 name="fairytale_examples",
-                embedding_function=self.embedding_fn
+                embedding_function=self.doc_embedding_fn
             )
             print(f"[SUCCESS] Fairytale Examples DB Connected. (Total Docs: {self.examples_collection.count()})")
         except Exception as e:
@@ -71,11 +81,13 @@ class FairyTaleRetriever:
         주어진 쿼리와 가장 유사한 전문가 지침 텍스트 반환 (Chroma DB 활용)
         """
         try:
+            # 질의는 query 모델로 임베딩하여 검색 (문서는 passage 모델로 색인됨)
+            query_embedding = self.query_embedding_fn([query])[0]
             results = self.collection.query(
-                query_texts=[query],
+                query_embeddings=[query_embedding],
                 n_results=top_k
             )
-            
+
             # 결과에서 'documents'(전문가 지침 텍스트) 추출
             guides = []
             if results['documents'] and len(results['documents'][0]) > 0:
@@ -91,20 +103,32 @@ class FairyTaleRetriever:
 
     def retrieve_example(self, query: str, top_k: int = 1) -> list:
         """
-        주어진 쿼리(아이 성향/상황)와 가장 유사한 모범 동화 예시를 반환합니다.
+        입력자의 조건(대상연령대/분위기)과 가장 잘 맞는 모범 동화 '본문'을 반환합니다.
+
+        예시는 '조건 요약 키'(condition_key)로 색인되어 있고 본문(story)은 메타데이터에
+        저장되어 있으므로, 검색은 조건 vs 조건으로 대칭 매칭하고 반환은 본문으로 한다.
+        (색인 구성은 scripts/build_example_index.py 참고)
         """
         try:
+            # 질의는 query 모델로 임베딩하여 검색 (문서는 passage 모델로 색인됨)
+            query_embedding = self.query_embedding_fn([query])[0]
             results = self.examples_collection.query(
-                query_texts=[query],
+                query_embeddings=[query_embedding],
                 n_results=top_k
             )
-            
+
             examples = []
-            if results['documents'] and len(results['documents'][0]) > 0:
-                for idx, doc in enumerate(results['documents'][0]):
-                    distance = results['distances'][0][idx] if 'distances' in results and results['distances'] else 0
-                    print(f"  [Example Match] Distance: {distance:.3f}")
-                    examples.append(doc)
+            metadatas = results.get('metadatas') or [[]]
+            documents = results.get('documents') or [[]]
+            for idx in range(len(documents[0])):
+                distance = results['distances'][0][idx] if results.get('distances') else 0
+                print(f"  [Example Match] Distance: {distance:.3f}")
+                meta = metadatas[0][idx] if metadatas and metadatas[0] else None
+                # 메타데이터에 본문(story)이 있으면 그것을, 없으면(구버전 색인) 문서를 사용
+                if meta and meta.get("story"):
+                    examples.append(meta["story"])
+                else:
+                    examples.append(documents[0][idx])
             return examples
         except Exception as e:
             print(f"Error during Example semantic retrieval: {e}")

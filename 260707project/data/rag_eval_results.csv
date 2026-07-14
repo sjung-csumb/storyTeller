@@ -1,0 +1,63 @@
+﻿system,problem,hit@1,hit@3,hit@5,first_rel_rank,dist@1
+A_query_only,화가 나면 친구를 때려요,True,True,True,1,0.9298
+A_query_only,동생을 자꾸 때리고 밀쳐요,True,True,True,1,0.9884
+A_query_only,마음에 안 들면 손이 먼저 나가요,False,False,True,4,0.9757
+A_query_only,친구를 자꾸 물어요,True,True,True,1,0.912
+A_query_only,화나면 엄마를 깨물어요,True,True,True,1,0.9536
+A_query_only,어린이집에서 친구를 물어 자국이 나요,True,True,True,1,0.9539
+A_query_only,장난감을 집어던지고 물건을 던져요,True,True,True,1,0.8617
+A_query_only,화가 나면 블록을 마구 던져요,True,True,True,1,0.9617
+A_query_only,밥을 안 먹고 편식이 심해요,True,True,True,1,0.8929
+A_query_only,채소는 절대 안 먹으려고 해요,True,True,True,1,0.8604
+A_query_only,좋아하는 것만 먹고 골고루 안 먹어요,True,True,True,1,0.9055
+A_query_only,마트에서 떼를 쓰고 고집을 부려요,True,True,True,1,0.9943
+A_query_only,원하는 걸 안 해주면 드러누워 떼써요,True,True,True,1,0.9242
+A_query_only,대소변을 잘 못 가려요,True,True,True,1,0.8695
+A_query_only,기저귀를 떼야 하는데 자꾸 실수해요,True,True,True,1,0.9426
+A_query_only,밤에 잠을 안 자고 자꾸 깨요,True,True,True,1,0.9452
+A_query_only,혼자 안 자려 하고 잠투정이 심해요,False,True,True,2,0.9547
+A_query_only,엄마와 떨어지면 심하게 울어요,True,True,True,1,0.9114
+A_query_only,어린이집 갈 때 엄마랑 안 떨어지려 해요,True,True,True,1,0.8903
+A_query_only,새로운 환경에서 위축되고 소심해요,True,True,True,1,0.9855
+A_query_only,낯선 사람 앞에서 말을 안 하고 숨어요,True,True,True,1,0.8816
+A_query_only,한자리에 못 앉고 산만해요,True,True,True,1,0.905
+A_query_only,잠시도 가만있지 못하고 뛰어다녀요,True,True,True,1,0.9679
+A_query_only,자꾸 거짓말을 해요,True,True,True,1,0.9499
+A_query_only,안 했으면서 안 했다고 둘러대요,False,True,True,2,1.0818
+A_query_only,손가락을 계속 빨아요,False,False,True,4,0.9848
+A_query_only,잘 때 꼭 손가락을 빨아야 자요,True,True,True,1,0.9219
+A_query_only,성기를 자꾸 만지작거려요,True,True,True,1,0.8756
+A_query_only,이불이나 바닥에 몸을 문질러요,False,True,True,3,1.1355
+A_query_only,욕을 하고 소리를 질러요,True,True,True,1,0.9328
+A_query_only,떼쓰면서 나쁜 말을 해요,False,True,True,2,0.9106
+B_passage_query,화가 나면 친구를 때려요,True,True,True,1,1.0447
+B_passage_query,동생을 자꾸 때리고 밀쳐요,True,True,True,1,1.0772
+B_passage_query,마음에 안 들면 손이 먼저 나가요,False,False,True,4,1.0881
+B_passage_query,친구를 자꾸 물어요,True,True,True,1,1.0019
+B_passage_query,화나면 엄마를 깨물어요,True,True,True,1,1.0365
+B_passage_query,어린이집에서 친구를 물어 자국이 나요,False,True,True,2,1.0231
+B_passage_query,장난감을 집어던지고 물건을 던져요,True,True,True,1,0.9673
+B_passage_query,화가 나면 블록을 마구 던져요,True,True,True,1,1.0516
+B_passage_query,밥을 안 먹고 편식이 심해요,True,True,True,1,1.0187
+B_passage_query,채소는 절대 안 먹으려고 해요,True,True,True,1,0.9599
+B_passage_query,좋아하는 것만 먹고 골고루 안 먹어요,True,True,True,1,1.02
+B_passage_query,마트에서 떼를 쓰고 고집을 부려요,True,True,True,1,1.0942
+B_passage_query,원하는 걸 안 해주면 드러누워 떼써요,True,True,True,1,1.0269
+B_passage_query,대소변을 잘 못 가려요,True,True,True,1,0.9626
+B_passage_query,기저귀를 떼야 하는데 자꾸 실수해요,True,True,True,1,1.0031
+B_passage_query,밤에 잠을 안 자고 자꾸 깨요,True,True,True,1,1.0399
+B_passage_query,혼자 안 자려 하고 잠투정이 심해요,True,True,True,1,1.053
+B_passage_query,엄마와 떨어지면 심하게 울어요,True,True,True,1,1.0278
+B_passage_query,어린이집 갈 때 엄마랑 안 떨어지려 해요,True,True,True,1,0.9849
+B_passage_query,새로운 환경에서 위축되고 소심해요,True,True,True,1,1.0885
+B_passage_query,낯선 사람 앞에서 말을 안 하고 숨어요,True,True,True,1,0.9967
+B_passage_query,한자리에 못 앉고 산만해요,True,True,True,1,1.0205
+B_passage_query,잠시도 가만있지 못하고 뛰어다녀요,True,True,True,1,1.067
+B_passage_query,자꾸 거짓말을 해요,True,True,True,1,1.0394
+B_passage_query,안 했으면서 안 했다고 둘러대요,False,True,True,2,1.1688
+B_passage_query,손가락을 계속 빨아요,True,True,True,1,1.0826
+B_passage_query,잘 때 꼭 손가락을 빨아야 자요,True,True,True,1,1.0339
+B_passage_query,성기를 자꾸 만지작거려요,True,True,True,1,0.9957
+B_passage_query,이불이나 바닥에 몸을 문질러요,False,True,True,2,1.2082
+B_passage_query,욕을 하고 소리를 질러요,True,True,True,1,1.0381
+B_passage_query,떼쓰면서 나쁜 말을 해요,True,True,True,1,1.0091

@@ -167,9 +167,12 @@ def retrieve_node(state: GraphState) -> GraphState:
     problem = child.get("problem_situation", "")
     
     retriever = get_retriever()
+    # 전문가 지침: '문제행동/성향'으로 검색 (해결 원칙을 찾기 위함)
     query = f"아이의 문제 행동: {problem}\n아이의 성향: {child.get('personality')}\n"
     few_shot_results = retriever.retrieve_few_shot(query, top_k=1)
-    example_results = retriever.retrieve_example(query, top_k=1)
+    # 모범 동화 예시: '대상 연령/분위기'로 검색 (문체·분량 스타일 참고가 목적)
+    example_query = f"대상 연령 {child.get('age')}세 / 분위기 {child.get('mood')}"
+    example_results = retriever.retrieve_example(example_query, top_k=1)
     
     rag_context = ""
     guide_text = ""
@@ -197,7 +200,13 @@ def retrieve_node(state: GraphState) -> GraphState:
             guide_text = "아이의 마음을 먼저 공감해주고, 긍정적인 대안 행동을 함께 찾아보세요."
         
     if example_results:
-        rag_context += f"--- [모범 동화 예시 (스타일/분량 참고용)] ---\n{example_results[0]}\n\n위 모범 예시의 문체, 문장 길이, 4페이지 분할 구조를 적극 참고해. 단, 예시가 JSON 형태더라도 너는 절대로 JSON 포맷으로 출력하지 말고, '순수한 텍스트 문단'으로만 4개의 단락(각 페이지)을 작성해.\n"
+        rag_context += (
+            f"--- [모범 동화 예시 (문체/분량 참고용)] ---\n{example_results[0]}\n\n"
+            "위 예시에서는 오직 '문체·어투·문장 길이·호흡·구어체 느낌'만 참고해. "
+            "예시의 플롯, 등장인물, 소재, 배경, 사건은 절대 가져다 쓰지 마. "
+            "이야기 내용은 이번 입력(주인공/문제 상황/배경)에 맞춰 완전히 새로 창작하고, "
+            "출력은 반드시 [1페이지]~[4페이지] 4개 단락의 순수 텍스트로만 작성해.\n"
+        )
         
     return {"rag_context": rag_context, "guide_text": guide_text, "revision_count": 0}
 
@@ -296,8 +305,11 @@ def draft_node(state: GraphState) -> GraphState:
     "  ③ 소통: 주인공이 마음을 가라앉히고 친구나 주변에 예쁘게 표현함 ('미안해', '같이 하자', '내가 해볼게' 등).\n\n"
     
     "[4페이지] 현실 실천 및 사회적 화합\n"
-    "- 3페이지에서 배운 대안 행동을 실제로 행하며 다 함께 웃고 화합하는 구체적인 장면으로 마무리.\n"
-    "- [4페이지 결말 유연화] 꿈이면 깨어나 안기고, 현실이면 조력자/친구들과 훈훈하게 마무리할 것.\n\n"
+    "- 🎯 문제 행동 '직접 교정'의 법칙 (필수): 주인공은 반드시 [문제 상황]에서 요구된 바람직한 행동을 스스로 '실제로 해내는' 구체적 장면을 보여줘야 해. "
+    "예) 편식이면 채소를 '진짜로 한 입 먹는다', 양치 거부면 '직접 이를 닦는다', 안 나눔이면 '친구에게 나눠 준다', 때리기면 '친구와 사이좋게 함께 논다', 떼쓰기면 '스스로 참고 기다린다'.\n"
+    "- 🚫 회피형 결말 절대 금지: 문제의 대상(채소, 장난감, 양치 등)을 치우기·바구니에 담아 없애기·다른 곳(친구 집 등)으로 보내기·나중으로 미루기처럼 '없애거나 피하는' 방식으로 끝내지 마. "
+    "주인공이 그 대상과 '직접 긍정적으로 상호작용(먹기, 사용하기, 나눠 쓰기)'하는 장면이 반드시 있어야 해.\n"
+    "- 주인공의 그 실천을 조력자·친구들이 칭찬하고 다 함께 웃으며 화합하는 장면으로 마무리. (꿈이면 깨어나 안기고, 현실이면 훈훈하게.)\n\n"
 
     "🚫 [유아어 및 맞춤법 금기사항]\n"
     "- 동물의 신체 부위인 '이빨' 표현은 절대 금지하며, 반드시 '이' 또는 '치아'라고 쓸 것. 치약을 삼켜도 괜찮다는 식의 오인 묘사 금지.\n"
@@ -335,6 +347,36 @@ def draft_node(state: GraphState) -> GraphState:
     ])
 
     return {"draft_ko": response.content, "revision_count": state["revision_count"] + 1}
+
+def check_resolution_performed(draft: str, problem: str) -> tuple[bool, str]:
+    """결말(4페이지)에서 주인공이 [문제 상황]의 목표 행동을 '실제로 직접 수행'하는지
+    LLM 심사관으로 판정한다. 대상을 치우기/없애기/미루기/말로만 다짐하기로 끝나면 false.
+    문제유형별 하드코딩 없이 편식·양치·때리기 등 전반에 일반적으로 작동한다.
+    판정 실패(예외) 시엔 통과(True)로 두어 생성을 막지 않는다."""
+    if not problem or not UPSTAGE_API_KEY:
+        return True, ""
+    system = (
+        "너는 아동 행동교정 동화의 '결말 실천'을 검사하는 심사관이야. "
+        "먼저 [문제 상황]에서 아이가 길러야 할 '바람직한 목표 행동'을 스스로 정하고, "
+        "동화의 마지막 페이지에서 주인공이 그 목표 행동을 '직접 실제로 수행'하는지 판단해. "
+        "문제의 대상을 치우기·없애기·다른 곳으로 보내기·나중으로 미루기·말로만 다짐하기로 "
+        "끝나면 수행하지 않은 것(false)으로 판정해. "
+        "예: 편식→채소를 실제로 먹어야 true, 양치 거부→직접 이를 닦아야 true, "
+        "때리기→친구와 사이좋게 함께 놀아야 true, 정리 안 함→직접 정리해야 true.\n"
+        '반드시 JSON만 출력: {"performed": true 또는 false, "target": "목표 행동", "reason": "판단 근거 한 줄"}'
+    )
+    try:
+        resp = finalize_llm.invoke([
+            SystemMessage(content=system),
+            HumanMessage(content=f"[문제 상황]\n{problem}\n\n[동화]\n{draft}"),
+        ])
+        raw = resp.content.strip()
+        s, e = raw.find("{"), raw.rfind("}")
+        obj = json.loads(raw[s:e + 1])
+        return bool(obj.get("performed", True)), str(obj.get("reason", ""))
+    except Exception as ex:
+        print(f"[Resolution check skipped] {ex}")
+        return True, ""
 
 def review_node(state: GraphState) -> GraphState:
     draft = state["draft_ko"]
@@ -384,6 +426,17 @@ def review_node(state: GraphState) -> GraphState:
             issues.append(
                 f"다음 페이지가 최대 문장 수({MAX_SENTENCES_PER_PAGE}문장)를 초과했습니다: {', '.join(over_limit)}. "
                 "내용을 줄이되 문장을 억지로 이어붙이지 말고, 꼭 필요한 문장만 남겨서 다시 쓰세요."
+            )
+
+    # 결말 실천 검사: 4페이지에서 주인공이 목표 행동을 실제로 수행했는지 (회피형 결말 방지)
+    if len(pages) == 4:
+        problem = child.get("problem_situation", "")
+        performed, reason = check_resolution_performed(draft, problem)
+        if not performed:
+            issues.append(
+                "결말(4페이지)에서 주인공이 문제 상황의 바람직한 행동을 실제로 해내지 않았습니다"
+                f"{f' ({reason})' if reason else ''}. 대상을 치우거나·없애거나·미루지 말고, "
+                "4페이지에서 주인공이 그 행동을 직접 수행하는 구체적 장면(예: 편식이면 채소를 진짜로 한 입 먹는)으로 다시 쓰세요."
             )
 
     if issues and revision_count < 3:
@@ -497,6 +550,40 @@ def build_initial_state(child: Any, appearance: str, personality: str, place: st
         "guide_text": ""
     }
 
+# --- 문장부호 보정 -----------------------------------------------------------
+# draft LLM(solar-pro3)이 "모든 문장을 문장부호로 끝맺어라" 규칙을 약 1/3 확률로
+# 무시하고 마침표 없이 문장을 공백으로만 이어붙이는 경우가 있다. 이러면 가독성이
+# 떨어지고 review_node의 문장 수 검사(마침표 개수 기반)도 무력화된다. 그래서 부호가
+# 부족할 때만 '부호만' 채워 넣는 후처리를 둔다. (내용/띄어쓰기/페이지 마커는 보존)
+_END_LIKE_RE = re.compile(r"(요|죠|다|까|래|자|줘|야|군|네)(\s|$)")
+
+def ensure_sentence_punctuation(text: str) -> str:
+    if not text or not UPSTAGE_API_KEY:
+        return text
+    marks = sum(text.count(c) for c in (".", "!", "?"))
+    approx_sentences = len(_END_LIKE_RE.findall(text))
+    # 이미 충분히 찍혀 있으면(정상 케이스) 그대로 둔다.
+    if marks >= max(2, approx_sentences * 0.5):
+        return text
+    system = (
+        "너는 한국어 문장부호 교정기야. 입력 텍스트의 내용, 단어, 띄어쓰기, 줄바꿈, "
+        "'[n페이지]' 마커는 하나도 바꾸지 말고, 각 문장이 끝나는 자리에 알맞은 문장부호만 "
+        "넣어라. 평서문은 마침표(.), 질문은 물음표(?), 감탄/외침은 느낌표(!)로. "
+        "글자를 추가·삭제·수정하거나 문장을 다시 쓰지 마. 부호가 채워진 텍스트만 출력해."
+    )
+    try:
+        resp = finalize_llm.invoke([
+            SystemMessage(content=system),
+            HumanMessage(content=text),
+        ])
+        fixed = resp.content.strip()
+        # 안전장치: 결과가 원문 대비 크게 짧아지면(내용 손실 의심) 원문을 유지
+        if len(fixed) >= len(text) * 0.8:
+            return fixed
+    except Exception as e:
+        print(f"[Punctuation fix skipped] {e}")
+    return text
+
 def generate_draft_text(child: Any, appearance: str, personality: str, place: str, time_period: str, mood: str, problem_situation: str, language: str = "ko") -> tuple[str, str]:
     """초안 텍스트 생성"""
     if not UPSTAGE_API_KEY:
@@ -505,7 +592,7 @@ def generate_draft_text(child: Any, appearance: str, personality: str, place: st
     initial_state = build_initial_state(child, appearance, personality, place, time_period, mood, problem_situation, language)
     print(f"Starting Draft Agent for {child.name}...")
     result = draft_app.invoke(initial_state)
-    return result["draft_ko"], result.get("guide_text", "")
+    return ensure_sentence_punctuation(result["draft_ko"]), result.get("guide_text", "")
 
 def revise_draft_text(child: Any, appearance: str, personality: str, place: str, time_period: str, mood: str, problem_situation: str, language: str, feedback: str) -> tuple[str, str]:
     """피드백 기반 텍스트 수정"""
@@ -516,7 +603,7 @@ def revise_draft_text(child: Any, appearance: str, personality: str, place: str,
     initial_state["feedback"] = feedback  # 피드백 주입
     print(f"Starting Revise Agent for {child.name} with feedback: {feedback}...")
     result = draft_app.invoke(initial_state)
-    return result["draft_ko"], result.get("guide_text", "")
+    return ensure_sentence_punctuation(result["draft_ko"]), result.get("guide_text", "")
 
 def finalize_story_json(child: Any, appearance: str, language: str, final_text: str) -> dict:
     """텍스트 확정 후 영문 번역 및 이미지 프롬프트 추출 (포맷팅)"""
