@@ -1,0 +1,38 @@
+# Environments
+.env
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Database
+*.db
+*.sqlite3
+fairy_tale.db
+
+# RAG & Embeddings
+data/chroma_db/
+chroma_db/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Custom Ignore for SMILE Project
+node_modules/
+package.json
+package-lock.json
+.vscode/
+.streamlit/
+.pytest_cache/
+.ruff_cache/
+satisfaction_ratings.json
+*.ipynb
+patch*.py
