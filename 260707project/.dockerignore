@@ -37,11 +37,16 @@ venv.bak/
 .env
 .env.local
 
-# Database
+# Database (로컬 SQLite 파일은 이미지에서 제외)
 *.db
 *.sqlite3
 chroma_db/
 fairy_tale.db
+
+# 단, ChromaDB 벡터스토어(RAG 지침/예시)는 반드시 이미지에 포함해야 검색이 동작한다.
+# 위 *.sqlite3 가 chroma.sqlite3 를 제외하지 않도록 명시적으로 되살린다.
+!data/guide_chroma_db/
+!data/guide_chroma_db/**
 
 # IDE and OS
 .vscode/
